@@ -77,8 +77,8 @@ class Env:
             operation_filter = [
                 'linalg.matmul',
                 'linalg.conv_2d',
-                # 'pooling',
-                # 'generic',
+                'pooling',
+                'generic',
                 'linalg.add',
             ]
             json_data = {op: details for op, details in json_data.items() if any([s in op for s in operation_filter])}
@@ -409,7 +409,7 @@ class Env:
 
         return next_obs, reward, done, next_state, final_state
 
-    def get_obs(self, state: OperationState):
+    def get_obs_old(self, state: OperationState):
         """Build the obervation vector for the input state.
 
         Args:
@@ -449,6 +449,33 @@ class Env:
 
         # Normalize the upper bounds of the loops
         obs[1:cfg.max_num_loops + 1] = obs[1:cfg.max_num_loops + 1] / 100
+
+        return obs
+
+    def get_obs(self, state: OperationState):
+        """Build the obervation vector for the input state.
+
+        Args:
+            state (OperationState): the input state.
+
+        Returns:
+            np.ndarray: observation vector of the state.
+        """
+
+        op_features_vector = build_op_features_vector(state.operation_features)
+
+        action_history = state.actions.reshape(-1)
+        action_mask = state.actions_mask
+
+        obs = np.concatenate((
+            # The input of the policy network:
+            op_features_vector,      # MAX_NUM_LOOPS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM*MAX_NUM_STORES_LOADS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM + 5
+            
+            action_history,  # MAX_NUM_LOOPS*3*CONFIG["truncate"]
+
+            # The action mask:
+            action_mask     # 5 + MAX_NUM_LOOPS + MAX_NUM_LOOPS + (MAX_NUM_LOOPS-1) + (MAX_NUM_LOOPS-2) + (MAX_NUM_LOOPS-3)
+        ))
 
         return obs
 

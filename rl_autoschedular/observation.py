@@ -11,7 +11,7 @@ from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, Benchm
 # ================================================ Public functions ================================================
 
 
-def build_op_features_vector(op_features: OperationFeatures):
+def build_op_features_vector_old(op_features: OperationFeatures):
     """Build the feature vector from the operation features dataclass.
 
     Args:
@@ -68,6 +68,77 @@ def build_op_features_vector(op_features: OperationFeatures):
 
     # print('   ', nested_loops.shape, load_access_matrices.shape, store_access_matrices.shape, operations_count.shape)
     feature_vector = np.concatenate((nested_loops, load_access_matrices, store_access_matrices, operations_count))
+
+    return feature_vector
+
+def build_op_features_vector(op_features: OperationFeatures):
+    """Build the feature vector from the operation features dataclass.
+
+    Args:
+        op_features (OperationFeatures): the operation features
+
+    Returns:
+        np.ndarray: the feature vector
+    """   
+    indices_size = min(cfg.max_num_loops, len(op_features.nested_loops))
+    
+    indices = [nested_loop.arg for nested_loop in op_features.nested_loops[:indices_size]]
+
+    indices_dim = {arg: i for (i, arg) in enumerate([nested_loop.arg for nested_loop in op_features.nested_loops])}
+
+    # Nested loop features: (upper/lower bounds, step)
+    upper_bounds = np.zeros((cfg.max_num_loops,))
+    for i, nested_loop in enumerate(op_features.nested_loops):
+        if i == cfg.max_num_loops:
+            break
+        upper_bounds[i] = nested_loop.upper_bound
+
+    # load access matrices:
+
+    load_data = op_features.load_data
+
+    load_access_matrices = np.zeros((cfg.max_num_stores_loads, cfg.max_num_load_store_dim, cfg.max_num_loops), dtype=np.int16)
+
+    for load_i, load in enumerate(load_data):
+        if load_i == cfg.max_num_stores_loads:
+            break
+        dimensions_terms = [__formula_str_to_list(term) for term in load]
+        for m, dimension_term in enumerate(dimensions_terms):
+            for index, factor in dimension_term:
+                if index in indices_dim:
+                    n = indices_dim[index]
+                    load_access_matrices[load_i, m, n] = factor
+
+    # load access matrices:
+    store_data = op_features.store_data
+
+    store_access_matrices = np.zeros((cfg.max_num_load_store_dim, cfg.max_num_loops), dtype=np.int16)
+
+    dimensions_terms = [__formula_str_to_list(term) for term in store_data]
+    for m, dimension_term in enumerate(dimensions_terms):
+        for index, factor in dimension_term:
+            n = indices_dim[index]
+            store_access_matrices[m, n] = factor
+
+    # Operations count:
+    operations_count = np.array(list(op_features.op_count.values()))
+
+    # Feature vector:
+    upper_bounds = upper_bounds.reshape(-1)
+    load_access_matrices = load_access_matrices.reshape(-1)
+    store_access_matrices = store_access_matrices.reshape(-1)
+
+    computation_vector = np.concatenate(
+        (
+            indices,
+            load_access_matrices,
+            store_access_matrices,
+            operations_count
+        )
+    )
+
+    # print('   ', nested_loops.shape, load_access_matrices.shape, store_access_matrices.shape, operations_count.shape)
+    feature_vector = np.concatenate((upper_bounds, computation_vector))
 
     return feature_vector
 

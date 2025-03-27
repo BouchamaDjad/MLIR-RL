@@ -86,6 +86,8 @@ def build_op_features_vector(op_features: OperationFeatures):
 
     indices_dim = {arg: i for (i, arg) in enumerate([nested_loop.arg for nested_loop in op_features.nested_loops])}
 
+    indices = [indices_dim[x] for x in indices] 
+
     # Nested loop features: (upper/lower bounds, step)
     upper_bounds = np.zeros((cfg.max_num_loops,))
     for i, nested_loop in enumerate(op_features.nested_loops):

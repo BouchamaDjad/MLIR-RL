@@ -311,7 +311,7 @@ def build_op_features_vector(op_features: OperationFeatures):
     return feature_vector
 
 
-def extract_op_features_from_affine_code(raw_operation: str, tmp_file_path: str):
+def extract_op_features_from_affine_code(raw_operation: str, tmp_file_path: str, maps: Optional[str] = None, additional_function: Optional[str] = None):
     """Get operation features from the raw operation.
 
     Args:
@@ -322,7 +322,7 @@ def extract_op_features_from_affine_code(raw_operation: str, tmp_file_path: str)
         OperationFeatures: operation features contained in the raw operation
     """
     # Get code as affine loops
-    wrapped_operation = __function_wrapper(raw_operation)
+    wrapped_operation = __function_wrapper(raw_operation,maps,additional_function)
     loops = __lower_linalg_to_loops(wrapped_operation, tmp_file_path)
     lines = loops.split('\n') if loops else []
 
@@ -577,7 +577,7 @@ def __remove_duplicate_args(args: list[str], shapes: list[str]):
     return args, shapes
 
 
-def __function_wrapper(operation: str, maps: Optional[str] = None):
+def __function_wrapper(operation: str, maps: Optional[str] = None, additional_function:Optional[str] = None):
     """Wraps the operation line in a function in order to be able to lower into loops
 
     Args:
@@ -589,6 +589,11 @@ def __function_wrapper(operation: str, maps: Optional[str] = None):
     """
     ins_outs_pattern = r"(?:ins|outs)\s*\(([^())]+)\)"
     fields: list[str] = re.findall(ins_outs_pattern, operation)
+
+    if fields == []:
+        returned_string = f"{maps}\n" if maps else ""
+        returned_string += f"{additional_function}\n" if additional_function else ""
+        return returned_string
 
     args: list[str] = []
     shapes: list[str] = []
@@ -608,6 +613,7 @@ def __function_wrapper(operation: str, maps: Optional[str] = None):
 
     if maps is None:
         wrapped_operation = (
+            f"{additional_function}\n" if additional_function else ""
             f"func.func @func_call({args_str}) -> {out_shape} {{\n"
             f"  %ret = {operation}\n"
             f"  return %ret : {out_shape}\n"
@@ -616,6 +622,7 @@ def __function_wrapper(operation: str, maps: Optional[str] = None):
     else:
         wrapped_operation = (
             f"{maps}\n"
+            f"{additional_function}\n" if additional_function else ""
             f"func.func @func_call({args_str}) -> {out_shape} {{\n"
             f"  %ret = {operation}\n"
             f"  return %ret : {out_shape}\n"
@@ -724,3 +731,145 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
         root_exec_time=root_execution_time,
         exec_time=execution_time
     )
+
+def __transform_wrapper(operation, maps: Optional[str]=None, additional_function: Optional[str] = None):
+
+    ins_outs_pattern = "(?:ins|outs)\s*\(([^())]+)\)"
+    fields = re.findall(ins_outs_pattern, operation)
+
+    if fields == [] and additional_function is not None:
+	# # TODO: Add shape extraction so that allocation snippet could be replicated
+        fields = re.findall("(?:\(([^(]+)\))(?:\s*\->\s*([^(]+))", operation)[0]
+        
+        args,shapes = [],[]
+        for f in fields[0].split(","):
+            shapes.append(f.strip())
+        # shapes.append(fields[1])
+
+        args = re.findall("(?:@\w+\(([^)]+))",operation)[0].split(',')
+
+        args = [arg.strip() for arg in args]
+        shapes = [shape.strip() for shape in shapes]
+
+    else:
+        args, shapes = [], []
+        for field in fields:
+            args_field, shapes_field = field.split(':')
+            args   += args_field.split(',')
+            shapes += shapes_field.split(',')
+
+        args = [arg.strip() for arg in args]
+        shapes = [shape.strip() for shape in shapes]
+
+        args, shapes = __remove_duplicate_args(args, shapes)
+    
+    # print_info(args,shapes)
+    
+    #############################################################
+    # consts:
+    dims = []
+    unique_dims = set()
+    for shape in shapes:
+        if shape.startswith("tensor"):
+            arg_dims = list(map(int, re.findall(r'\d+', shape[7:-5])))
+            dims.append( arg_dims )
+            unique_dims = unique_dims.union(arg_dims)
+        else: # shape == "f32"
+            dims.append( -1 )
+            unique_dims = unique_dims.union([-1])
+
+    unique_dims = sorted(list(unique_dims))
+
+    print(unique_dims)
+    
+    consts_snippet = ""
+    for dim in unique_dims:
+        if dim != -1:
+            consts_snippet += f"  %c{dim} = arith.constant {dim} : index\n"
+
+    #############################################################
+    # allocations:
+
+    # allocations_snippet = ""
+
+    # for arg, shape, arg_dims in zip(args, shapes, dims):
+    #     # print(arg, shape, arg_dims)
+    #     if shape.startswith("tensor"):
+    #         n = shape.count("x")
+    #         temp_shape = "tensor<" + "?x"*n + shape[-4:] # f32> or i64> ir i32>
+    #         alloc_params = ", ".join([f"%c{dim}" for dim in arg_dims])
+    #         allocations_snippet += f"  {arg}_temp = bufferization.alloc_tensor({alloc_params}) : {temp_shape}\n"
+    #         allocations_snippet += f"  {arg} = tensor.cast {arg}_temp : {temp_shape} to {shape}\n"
+    #     else:
+    #         # print(arg, shape, arg_dims)
+    #         allocations_snippet += f"  {arg} = arith.constant 1.00000e+00 : f32\n"
+
+    # print(allocations_snippet)
+
+    #############################################################
+    # function call:
+
+    # function_call_snippet = f"  %ret_arg = func.call @func_call({', '.join(args)}) : ({', '.join(shapes)}) -> ({shapes[-1]})"
+
+    #############################################################
+    # All code:
+
+    code = ""
+    if maps is not None:
+        code += f"{maps}\n"
+    code += 'module attributes {torch.debug_module_name = "Net"} {\n'
+    code += "func.func private @nanoTime() -> i64 attributes { llvm.emit_c_interface }\n"
+    code += "func.func private @printFlops(f64)\n"
+    code += "func.func private @printI64(i64)\n"
+    code += "func.func private @printNewline()\n"
+    code += "func.func private @printMemrefF32(tensor<*xf32>)\n"
+    code += f"{additional_function}\n" if additional_function else ""
+    code += "\n"
+    code += "\n"
+    code +=f"func.func @matmul() -> {shapes[-1]}{{\n"
+    code += "\n"
+    code += "%val = arith.constant 2.00000e+00 : f32\n"
+    code += "%zero = arith.constant 0.00000e+00 : f32\n"
+    code += "\n"
+    
+    # code +=f"%out = bufferization.alloc_tensor() : tensor<{N}x{K}xf32>\n"
+    # code +=f"%A = linalg.fill ins(%val : f32) outs(%out : tensor<{N}x{K}xf32>) -> tensor<{N}x{K}xf32>\n"
+    for arg, shape, arg_dims in zip(args, shapes, dims):
+        # print_info(arg,shape,arg_dims)
+        if shape != 'f32':
+            tmp_arg = f'%tmp_{arg[1:]}'
+            code +=f"{tmp_arg} = bufferization.alloc_tensor() : {shape}\n"
+            code +=f"{arg} = linalg.fill ins(%val : f32) outs({tmp_arg} : {shape}) -> {shape}\n"
+        else:
+            code +=f"{arg} = arith.constant 2.00000e+00 : f32\n"
+    
+    code += "\n"
+    code += "%t0 = func.call @nanoTime() : () -> (i64)\n"
+    code += "\n"
+    
+    # code +=f"%D = linalg.matmul ins(%A, %B: tensor<{N}x{K}xf32>, tensor<{K}x{M}xf32>) outs(%C: tensor<{N}x{M}xf32>) -> tensor<{N}x{M}xf32>\n"
+    code += f"%return_arg = {operation}"
+    
+    code += "\n"
+    code += "%t = func.call @nanoTime() : () -> (i64)\n"
+    code += "%delta = arith.subi %t, %t0 : i64\n"
+    code += "%fp = arith.uitofp %delta : i64 to f64\n"
+    code += "// func.call @printFlops(%fp) : (f64) -> ()\n"
+    code += "func.call @printI64(%delta) : (i64) -> ()\n"
+    code += "func.call @printNewline() : () -> ()\n"
+    code += "\n"
+    code +=f"return %return_arg : {shapes[-1]} \n"
+    code += "}\n"
+    code += "\n"
+    code += "func.func @main(){\n"
+    code += "    %c1 = arith.constant 1: index\n"
+    code += "    %c0 = arith.constant 0 : index\n"
+    code += "    %n = arith.constant 2: index\n"
+    code += "    scf.for %i = %c0 to %n step %c1 {\n"
+    code +=f"    %outputmain = func.call @matmul() : () -> {shapes[-1]}\n"
+    code += "    }\n"
+    code += "    return\n"
+    code += "}\n"
+    code += "}\n"
+
+    return code

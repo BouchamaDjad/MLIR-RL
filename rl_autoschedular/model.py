@@ -209,6 +209,13 @@ class HiearchyModel(nn.Module):
 
         self.action_mask_size = self.num_transformations + self.num_loops + self.num_loops + 3 * self.num_loops - 6
 
+        # TODO: fix the values
+        self.lstm = nn.LSTM(
+            input_size=self.input_size,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers
+        )
+
         self.backbone = nn.Sequential(
             nn.Linear(self.input_dim, 512),
             nn.ReLU(),
@@ -271,6 +278,11 @@ class HiearchyModel(nn.Module):
         I_mask = action_mask[..., I_BEGIN_2C:]
 
         # Model inference:
+        
+      #      output, (h_n,c_n) = self.lstm(input)
+       # embedding shape = (num layer, batch, hidden) if batch_first = True
+        _, ( embedding,  _) = self.lstm(input) # output shape = (batch, seq_lenght, hidden) input shape = (batch, seq, input size)
+
         x1 = self.backbone(x)
         transformation_logits = self.transformation_selection(x1)
         interchange_logits = self.interchange_fc(x1)

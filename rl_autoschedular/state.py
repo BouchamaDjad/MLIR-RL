@@ -78,3 +78,15 @@ class OperationState:
     """Cummulative reward of the operation."""
     tmp_file: str
     """Temporary file to store the MLIR code."""
+    
+@dataclass
+class LoopFeatures:
+    """Dataclass to store the operation features data."""
+    op_count: dict[str, int]
+    """Number of arithmetic operations in the operation."""
+    load_data: list[list[str]]
+    """List of load accesses where each load is represented by the list of access arguments."""
+    store_data: list[list[str]]
+    """List of store accesses where each store is represented by the list of access arguments."""
+    nested_loops: list[NestedLoopFeatures]
+    """List of nested loops where each loop is represented by the NestedLoopFeatures dataclass."""

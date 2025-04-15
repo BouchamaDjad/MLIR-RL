@@ -5,11 +5,177 @@ import os
 from copy import copy
 import subprocess
 from rl_autoschedular import config as cfg
-from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, BenchmarkFeatures
+from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, BenchmarkFeatures, LoopFeatures
 
 
 # ================================================ Public functions ================================================
 
+
+# ================================================ Tree vecteur functions ========================================
+
+class LoopNode:
+    def __init__(self, var_name,upper,lower, parent):
+        self.var_name = var_name
+        self.upper = upper
+        self.lower = lower
+        self.instructions = []  # lines inside the loop (including inner loops)
+        self.children = []
+        self.parent = parent
+        self.vector = None
+
+    def __repr__(self, level=0):
+        indent = "  " * level
+        result = f"{indent}- {self.var_name}\n"
+        for line in self.instructions:
+            result += f"{indent}    {line.strip()}\n"
+        for child in self.children:
+            result += child.__repr__(level + 1)
+        return result
+
+def build_loops_tree(file_path):
+    
+    with open(file_path, 'r', encoding='utf-8') as file:
+        file_content = file.read()
+    
+    lines = file_content.split('\n') if file_content else []
+    tree = parse_affine_loops(lines)
+    process_tree(tree)
+    
+    return tree
+
+
+def parse_affine_loops(lines):
+    stack = []
+    root_nodes = []
+    collecting = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if "affine.for" in stripped:
+            parts = stripped.split()
+            try:
+                _, arg, _, lower, _, upper, _ = parts
+                var_name = arg  # e.g., %arg0
+            except (ValueError, IndexError):
+                var_name = "unknown"
+
+            parent = stack[-1] if stack else None
+            node = LoopNode(var_name,upper,lower, parent=parent)
+            
+
+            # Add node to parent or as root
+            if parent:
+                parent.children.append(node)
+            else:
+                root_nodes.append(node)
+
+            stack.append(node)
+            node.instructions.append(line)
+            continue
+
+        # Add line to current loop's instructions
+        if stack:
+            stack[-1].instructions.append(line)
+
+        # Closing brace ends current loop scope
+        if "}" in stripped and stack:
+            stack.pop()
+
+    return root_nodes[0] #return the first one for now
+    
+
+def process_tree(node):
+    loop_features = extract_op_features_from_affine_code_tree(node)
+    node.vector = build_op_features_vector(loop_features)
+    for child in node.children:
+        process_tree(child)
+    return node
+
+def extract_op_features_from_affine_code_tree(node):
+    """Get operation features from the raw operation.
+
+    Args:
+        lines: the code for the for loop
+
+    Returns:
+        OperationFeatures: operation features contained in the raw operation
+    """
+
+    lines = node.instructions
+    
+    # Build op features
+    nested_loops = []
+    op_count = {'+': 0, '-': 0, '*': 0, '/': 0, 'exp': 0}
+    load_data = []
+    store_data = []
+
+    maps: dict[str, str] = {}
+    args_of_loops: list[str] = []
+    args_of_map: dict[str, str] = {}
+
+    for line in lines:
+
+        if "affine_map" in line:
+            map_name, map_function = line.strip().split(' = ')
+            map_function = map_function.split(' -> ')[1][1:-2]
+            maps[map_name] = map_function
+
+        elif "affine.apply" in line:
+            new_op, _, _, *map_name__args = line.strip().split(' ')
+            map_name__args = ' '.join(map_name__args)
+            s = map_name__args.index('(')
+            map_name, args = map_name__args[:s], map_name__args[s + 1:-1].split(', ')
+            mapping_string = copy(maps[map_name])
+            for i in range(len(args)):
+                mapping_string = mapping_string.replace(f'd{i}', args[i])
+            # print(new_op, map_name, args, maps[map_name], mapping_string)
+            args_of_map[new_op] = mapping_string
+
+        elif "affine.load" in line:
+            # print(line.strip().split(' ')[:-2])
+            new_op, _, _, *alloc = line.strip().split(' ')[:-2]
+            alloc = ' '.join(alloc)
+            args = alloc.split('[')[1][:-1].split(', ')
+
+            for i in range(len(args)):
+                if args[i] in args_of_map:
+                    args[i] = args_of_map[args[i]]
+
+            load_data.append(args)
+
+        elif "arith.addf" in line:
+            op_count['+'] += 1
+        elif "arith.mulf" in line:
+            op_count['*'] += 1
+        elif "arith.subf" in line:
+            op_count['-'] += 1
+        elif "arith.divf" in line:
+            op_count['/'] += 1
+        elif "math.exp" in line:
+            op_count['exp'] += 1
+    
+    parent_node = node.parent
+    while parent_node is not None:
+        nested_loops.append(
+                NestedLoopFeatures(
+                    arg=parent_node.var_name,
+                    lower_bound=int(parent_node.lower),
+                    upper_bound=int(parent_node.upper),
+                    step=1,
+                    iterator_type='parallel'
+                )
+            )
+        parent_node = parent_node.parent
+        
+    return LoopFeatures(
+        op_count=op_count,
+        load_data=load_data,
+        store_data=store_data,
+        nested_loops=nested_loops
+    )
+
+# ==================================================== end of tree vecteur functions ===================================
 
 def build_op_features_vector_old(op_features: OperationFeatures):
     """Build the feature vector from the operation features dataclass.

@@ -5,6 +5,8 @@ from torch.distributions import Categorical
 from typing import Optional
 from rl_autoschedular import config as cfg
 
+def initialization_function_xavier(x):
+    return nn.init.xavier_uniform_(x)
 
 class HiearchyModel_old(nn.Module):
     """Hierarchical reinforcement learning model for MLIR code optimization."""
@@ -202,19 +204,30 @@ class HiearchyModel(nn.Module):
         L = cfg.max_num_loops
         D = cfg.max_num_load_store_dim
         SD = cfg.max_num_stores_loads
+        
+        self.embedding_size = 128
+        self.comp_emb_size = 128
+        
         self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate
         self.num_loops = L
         self.num_transformations = cfg.num_transformations
         self.num_tiles = cfg.num_tile_sizes
 
         self.action_mask_size = self.num_transformations + self.num_loops + self.num_loops + 3 * self.num_loops - 6
-
-        # TODO: fix the values
-        self.lstm = nn.LSTM(
-            input_size=self.input_size,
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers
+        
+        self.no_comps_tensor = nn.Parameter(torch.randn(1, embedding_size) * 0.01)
+        self.no_nodes_tensor = nn.Parameter(torch.randn(1, embedding_size) * 0.01)
+        
+        self.comps_lstm = nn.LSTM(
+            comp_emb_size, embedding_size, batch_first=True
         )
+        
+        # LSTM to encode child loop levels
+        self.nodes_lstm = nn.LSTM(
+            comp_emb_size, embedding_size, batch_first=True
+        )
+        
+        
 
         self.backbone = nn.Sequential(
             nn.Linear(self.input_dim, 512),
@@ -239,7 +252,59 @@ class HiearchyModel(nn.Module):
         self.interchange_fc = nn.Linear(512, (3 * self.num_loops - 6))
         self.tiling_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no tiling
         self.parall_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no parallelizattion
-
+    
+    
+    def get_hidden_state(self, node):
+        nodes_list = []
+        for n in node.children:
+            # Recusrive call to embed all the children of the loop first if they exist
+            nodes_list.append(self.get_hidden_state(
+                n))
+        
+        if nodes_list != []:
+            # Pass the embedding of all the child loops through the nodes LSTM
+            nodes_tensor = torch.cat(nodes_list, 1)
+            lstm_out, (nodes_h_n, nodes_c_n) = self.nodes_lstm(nodes_tensor)
+            nodes_h_n = nodes_h_n.permute(1, 0, 2)
+        
+        else: # If there are no child loops contained within this level
+            # The nodes embedding is a random vector (no_nodes_tensor) that represents that there are no nodes underneath this level
+            nodes_h_n = torch.unsqueeze(self.no_nodes_tensor, 0).expand(
+                comp_emb_size, -1, -1
+            )
+        if node.vector:
+            # If there are computations contained in this loop, pass them through the computations LSTM
+            
+            lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
+                node.vector
+            )
+            comps_h_n = comps_h_n.permute(1, 0, 2)
+        else: # If there are no child computations contained within this level
+            # The computations embedding is a random vector (no_comps_tensor) that represents that there are no computations underneath this level
+            comps_h_n = torch.unsqueeze(self.no_comps_tensor, 0).expand(
+                comp_emb_size, 
+                -1, 
+                -1
+            )
+        # Get the loop vector for this level
+        selected_loop_tensor = torch.index_select(
+            loops_tensor, 
+            1, 
+            node["loop_index"].to(self.device)
+        )
+        # Concatinate the loop vector, computations embedding and nodes (child loops) embedding
+        x = torch.cat((nodes_h_n, comps_h_n, selected_loop_tensor), 2)
+        # Pass the concatinated vector through a feed forward neural network
+        
+        ## TODO : make the concat layers work
+        
+        for i in range(len(self.concat_layers)):
+            x = self.concat_layers[i](x)
+            x = self.concat_dropouts[i](self.ELU(x))
+        return x
+       
+       
+       ## TODO : update the sample method to accept the nodes (or the final vector im not sure how exactly this is gonna work)
     def sample(self, obs: torch.Tensor, actions: Optional[list[tuple[str, list[int]]]] = None):
         """Sample an action from the model.
 

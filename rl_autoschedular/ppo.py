@@ -60,6 +60,7 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         x = torch.cat(batch_obs)
         with torch.no_grad():
             action_index, action_log_p, values, entropy = model.sample(x)
+            # TODO: Look into removing the following code (repetition of model.sample call for no obvious reason )
             new_action_index, new_action_log_p, new_values, new_entropy = model.sample(x, actions=action_index)
             assert (action_index == new_action_index), 'check the get_p yerham babak'
             assert (new_action_log_p == action_log_p).all(), 'check the get_p yerham babak'
@@ -401,4 +402,5 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
 
         print('\n\n\n')
 
-    neptune_logs['eval/average_speedup'].append(sum(speedup_values) / len(speedup_values))
+    if neptune_logs is not None:
+        neptune_logs['eval/average_speedup'].append(sum(speedup_values) / len(speedup_values))

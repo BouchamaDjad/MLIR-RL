@@ -202,7 +202,7 @@ class HiearchyModel(nn.Module):
         L = cfg.max_num_loops
         D = cfg.max_num_load_store_dim
         SD = cfg.max_num_stores_loads
-        self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate
+        self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate + 6 # TODO: rechange it once the observation vector is finalized
         self.num_loops = L
         self.num_transformations = cfg.num_transformations
         self.num_tiles = cfg.num_tile_sizes
@@ -210,11 +210,11 @@ class HiearchyModel(nn.Module):
         self.action_mask_size = self.num_transformations + self.num_loops + self.num_loops + 3 * self.num_loops - 6
 
         # TODO: fix the values
-        self.lstm = nn.LSTM(
-            input_size=self.input_size,
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers
-        )
+        # self.lstm = nn.LSTM(
+        #     input_dim=self.input_size,
+        #     hidden_size=self.hidden_size,
+        #     num_layers=self.num_layers
+        # )
 
         self.backbone = nn.Sequential(
             nn.Linear(self.input_dim, 512),
@@ -279,9 +279,9 @@ class HiearchyModel(nn.Module):
 
         # Model inference:
         
-      #      output, (h_n,c_n) = self.lstm(input)
-       # embedding shape = (num layer, batch, hidden) if batch_first = True
-        _, ( embedding,  _) = self.lstm(input) # output shape = (batch, seq_lenght, hidden) input shape = (batch, seq, input size)
+        # output, (h_n,c_n) = self.lstm(input)
+        # embedding shape = (num layer, batch, hidden) if batch_first = True
+        # _, ( embedding,  _) = self.lstm(input) # output shape = (batch, seq_lenght, hidden) input shape = (batch, seq, input size)
 
         x1 = self.backbone(x)
         transformation_logits = self.transformation_selection(x1)
@@ -336,6 +336,9 @@ class HiearchyModel(nn.Module):
                     transformation_index[i] = 4
                 elif action_name == 'img2col':
                     transformation_index[i] = 5
+                elif action_name == "fusion":
+                    transformation_index[i] = 6
+
 
         # Get the action prob and log_prob
         transformation_log_p = F.log_softmax(transformation_logits, dim=-1).gather(-1, transformation_index.unsqueeze(-1)).reshape(*leading_dims, -1)
@@ -373,6 +376,9 @@ class HiearchyModel(nn.Module):
 
             elif transformation_index[i] == 5:
                 actions.append(['img2col', None])
+
+            elif transformation_index[i] == 6:
+                actions.append(['fusion', None])
 
         transformation_log_p, interchange_log_p, tiling_log_p, parall_log_p = transformation_log_p.reshape(-1), interchange_log_p.reshape(-1), tiling_log_p.reshape(-1), parall_log_p.reshape(-1)
 

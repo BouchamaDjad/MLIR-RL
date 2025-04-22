@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Literal
 import numpy as np
 
+from observation import LoopNode
 
 @dataclass
 class NestedLoopFeatures:
@@ -56,10 +57,14 @@ class OperationState:
     """The benchmark's name."""
     operation_tag: str
     """Tag used to identify the operation in the MLIR code."""
+    operation_index: int
+    """the index of the current operation with respect to all the operations of the given code"""
     operation_type: str
     """The type of the operation (generic, matmul, conv2d, ...)."""
     operation_features: OperationFeatures
     """Features of the operation."""
+    code_tree: LoopNode
+    """The Tree structure of the code at the current state"""
     transformed_code: str
     """The operation string with wrapping and transformations."""
     actions: np.ndarray

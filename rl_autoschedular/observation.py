@@ -43,6 +43,15 @@ def build_loops_tree(file_path):
     
     return tree
 
+def build_loops_tree_using_lowering(content: str, tmp_path: str):  
+    content = __lower_linalg_to_loops(content, tmp_path)
+
+    lines = content.split('\n') if content else []
+    tree = parse_affine_loops(lines)
+    process_tree(tree)
+    
+    return tree
+
 
 def parse_affine_loops(lines):
     stack = []
@@ -248,11 +257,15 @@ def build_op_features_vector(op_features: OperationFeatures):
     """   
     indices_size = min(cfg.max_num_loops, len(op_features.nested_loops))
     
-    indices = [nested_loop.arg for nested_loop in op_features.nested_loops[:indices_size]]
+    indices_array = [nested_loop.arg for nested_loop in op_features.nested_loops[:indices_size]]
 
     indices_dim = {arg: i for (i, arg) in enumerate([nested_loop.arg for nested_loop in op_features.nested_loops])}
 
-    indices = [indices_dim[x] for x in indices] 
+    indices = np.zeros(shape=(cfg.max_num_loops,))
+    indices[:indices_size] = [indices_dim[x] for x in indices_array]
+
+    # redefinition in order to filter out args for loop not within the limit
+    indices_dim = {arg: i for (arg, i) in indices_dim.items() if arg in indices_array}
 
     # Nested loop features: (upper/lower bounds, step)
     upper_bounds = np.zeros((cfg.max_num_loops,))
@@ -744,7 +757,7 @@ def __transform_wrapper(operation, maps: Optional[str]=None, additional_function
         args,shapes = [],[]
         for f in fields[0].split(","):
             shapes.append(f.strip())
-        # shapes.append(fields[1])
+        shapes.append(fields[1])
 
         args = re.findall("(?:@\w+\(([^)]+))",operation)[0].split(',')
 

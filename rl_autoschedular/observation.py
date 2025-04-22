@@ -19,18 +19,42 @@ def build_loops_tree(file_path):
         file_content = file.read()
     
     lines = file_content.split('\n') if file_content else []
+    
+    pre_nodes_lines = []
+    for line in lines:
+        if "affine.for" in line:
+            break
+
+        pre_nodes_lines.append(line)
+
+    pre_nodes_lines = [line for line in pre_nodes_lines if "affine_map" in line]
+
+    pre_nodes_maps: dict[str, str] = {}
+
+    for line in pre_nodes_lines:
+        if "affine_map" in line:
+                map_name, map_function = line.strip().split(' = ')
+                map_function = map_function.split(' -> ')[1][1:-2]
+                pre_nodes_maps[map_name] = map_function
+
+    print(pre_nodes_maps)
+
     tree = parse_affine_loops(lines)
-    process_tree(tree)
+    process_tree(tree, pre_nodes_maps)
     
     return tree
 
 def build_loops_tree_using_lowering(content: str, tmp_path: str):  
     content = __lower_linalg_to_loops(content, tmp_path)
-
-    lines = content.split('\n') if content else []
-    tree = parse_affine_loops(lines)
-    process_tree(tree)
     
+    if not content:
+        return None
+
+    with open(tmp_path,"w") as f:
+        f.write(content)
+
+    tree = build_loops_tree(tmp_path)
+
     return tree
 
 
@@ -75,14 +99,15 @@ def parse_affine_loops(lines):
     return root_nodes[0] #return the first one for now
     
 
-def process_tree(node):
-    loop_features = extract_op_features_from_affine_code_tree(node)
+def process_tree(node, maps = None):
+    print(maps)
+    loop_features = extract_op_features_from_affine_code_tree(node,maps)
     node.vector = build_op_features_vector(loop_features)
     for child in node.children:
-        process_tree(child)
+        process_tree(child,maps)
     return node
 
-def extract_op_features_from_affine_code_tree(node):
+def extract_op_features_from_affine_code_tree(node, maps = None):
     """Get operation features from the raw operation.
 
     Args:
@@ -100,7 +125,7 @@ def extract_op_features_from_affine_code_tree(node):
     load_data = []
     store_data = []
 
-    maps: dict[str, str] = {}
+    maps: dict[str, str] = maps if maps is not None else {}
     args_of_loops: list[str] = []
     args_of_map: dict[str, str] = {}
 

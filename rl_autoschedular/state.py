@@ -2,7 +2,24 @@ from dataclasses import dataclass
 from typing import Literal
 import numpy as np
 
-from observation import LoopNode
+class LoopNode:
+    def __init__(self, var_name,upper,lower, parent):
+        self.var_name = var_name
+        self.upper = upper
+        self.lower = lower
+        self.instructions = []  # lines inside the loop (including inner loops)
+        self.children = []
+        self.parent = parent
+        self.vector = None
+
+    def __repr__(self, level=0):
+        indent = "  " * level
+        result = f"{indent}- {self.var_name}\n"
+        for line in self.instructions:
+            result += f"{indent}    {line.strip()}\n"
+        for child in self.children:
+            result += child.__repr__(level + 1)
+        return result
 
 @dataclass
 class NestedLoopFeatures:

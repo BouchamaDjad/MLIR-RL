@@ -5,7 +5,7 @@ import os
 from copy import copy
 import subprocess
 from rl_autoschedular import config as cfg
-from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, BenchmarkFeatures, LoopFeatures
+from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, BenchmarkFeatures, LoopFeatures, LoopNode
 
 
 # ================================================ Public functions ================================================
@@ -13,31 +13,21 @@ from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, Benchm
 
 # ================================================ Tree vecteur functions ========================================
 
-class LoopNode:
-    def __init__(self, var_name,upper,lower, parent):
-        self.var_name = var_name
-        self.upper = upper
-        self.lower = lower
-        self.instructions = []  # lines inside the loop (including inner loops)
-        self.children = []
-        self.parent = parent
-        self.vector = None
-
-    def __repr__(self, level=0):
-        indent = "  " * level
-        result = f"{indent}- {self.var_name}\n"
-        for line in self.instructions:
-            result += f"{indent}    {line.strip()}\n"
-        for child in self.children:
-            result += child.__repr__(level + 1)
-        return result
-
 def build_loops_tree(file_path):
     
     with open(file_path, 'r', encoding='utf-8') as file:
         file_content = file.read()
     
     lines = file_content.split('\n') if file_content else []
+    tree = parse_affine_loops(lines)
+    process_tree(tree)
+    
+    return tree
+
+def build_loops_tree_using_lowering(content: str, tmp_path: str):  
+    content = __lower_linalg_to_loops(content, tmp_path)
+
+    lines = content.split('\n') if content else []
     tree = parse_affine_loops(lines)
     process_tree(tree)
     
@@ -248,11 +238,15 @@ def build_op_features_vector(op_features: OperationFeatures):
     """   
     indices_size = min(cfg.max_num_loops, len(op_features.nested_loops))
     
-    indices = [nested_loop.arg for nested_loop in op_features.nested_loops[:indices_size]]
+    indices_array = [nested_loop.arg for nested_loop in op_features.nested_loops[:indices_size]]
 
     indices_dim = {arg: i for (i, arg) in enumerate([nested_loop.arg for nested_loop in op_features.nested_loops])}
 
-    indices = [indices_dim[x] for x in indices] 
+    indices = np.zeros(shape=(cfg.max_num_loops,))
+    indices[:indices_size] = [indices_dim[x] for x in indices_array]
+
+    # redefinition in order to filter out args for loop not within the limit
+    indices_dim = {arg: i for (arg, i) in indices_dim.items() if arg in indices_array}
 
     # Nested loop features: (upper/lower bounds, step)
     upper_bounds = np.zeros((cfg.max_num_loops,))
@@ -744,7 +738,7 @@ def __transform_wrapper(operation, maps: Optional[str]=None, additional_function
         args,shapes = [],[]
         for f in fields[0].split(","):
             shapes.append(f.strip())
-        # shapes.append(fields[1])
+        shapes.append(fields[1])
 
         args = re.findall("(?:@\w+\(([^)]+))",operation)[0].split(',')
 

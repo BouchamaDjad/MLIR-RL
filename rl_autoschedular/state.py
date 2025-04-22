@@ -2,6 +2,24 @@ from dataclasses import dataclass
 from typing import Literal
 import numpy as np
 
+class LoopNode:
+    def __init__(self, var_name,upper,lower, parent):
+        self.var_name = var_name
+        self.upper = upper
+        self.lower = lower
+        self.instructions = []  # lines inside the loop (including inner loops)
+        self.children = []
+        self.parent = parent
+        self.vector = None
+
+    def __repr__(self, level=0):
+        indent = "  " * level
+        result = f"{indent}- {self.var_name}\n"
+        for line in self.instructions:
+            result += f"{indent}    {line.strip()}\n"
+        for child in self.children:
+            result += child.__repr__(level + 1)
+        return result
 
 @dataclass
 class NestedLoopFeatures:
@@ -56,10 +74,14 @@ class OperationState:
     """The benchmark's name."""
     operation_tag: str
     """Tag used to identify the operation in the MLIR code."""
+    operation_index: int
+    """the index of the current operation with respect to all the operations of the given code"""
     operation_type: str
     """The type of the operation (generic, matmul, conv2d, ...)."""
     operation_features: OperationFeatures
     """Features of the operation."""
+    code_tree: LoopNode
+    """The Tree structure of the code at the current state"""
     transformed_code: str
     """The operation string with wrapping and transformations."""
     actions: np.ndarray

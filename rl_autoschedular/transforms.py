@@ -169,35 +169,36 @@ def transform_dialect_interchange(code: str, operation_tag: str, interchange_lis
     return result
 
 
-# def transform_dialect_fuse(code, consumer_tag, producer_tag, tmp_file):
-#     code = code.strip()
+def transform_dialect_fusion(code: str, operation_tag: str, next_operation_tag: str, tmp_file_path: str):
+    
+    code = code.strip()
 
-#     transform_dilaect_code = (
-#         f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
-#         f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
-#         f'    %op_{producer_tag} = transform.structured.match attributes{{tag = "{producer_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-#         f'    %op_{consumer_tag} = transform.structured.match attributes{{tag = "{consumer_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-#         f'    %forall_op_{consumer_tag} = transform.get_parent_op %op_{consumer_tag}: (!transform.any_op) -> !transform.any_op\n'
-#         f'    transform.structured.fuse_into_containing_op %op_{producer_tag} into %forall_op_{consumer_tag} : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
-#         f'    transform.yield\n'
-#         f'  }}\n'
-#         f'}}\n'
-#     )
+    transform_dilaect_code = (
+        f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
+        f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
+        f'    %op_{next_operation_tag} = transform.structured.match attributes{{tag = "{next_operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+        f'    %op_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+        f'    %forall_op_{operation_tag} = transform.get_parent_op %op_{operation_tag}: (!transform.any_op) -> !transform.any_op\n'
+        f'    transform.structured.fuse_into_containing_op %op_{next_operation_tag} into %forall_op_{operation_tag} : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
+        f'    transform.yield\n'
+        f'  }}\n'
+        f'}}\n'
+    )
 
-#     code = code + transform_dilaect_code + '\n'
+    code = code + transform_dilaect_code + '\n'
 
-#     with open(tmp_file, "w") as file:
-#         file.write(code)
+    with open(tmp_file_path, "w") as file:
+        file.write(code)
 
-#     result = os.popen(
-#         f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-#     ).read()
+    result = os.popen(
+        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+    ).read()
 
-#     result = result.replace("module {\n", "", 1)
-#     result = ''.join(result.rsplit('\n}\n', 1))
-#     result = re.sub(r"module attributes \{transform.with_named_sequence\} \{\s+\}", "", result)
+    result = result.replace("module {\n", "", 1)
+    result = ''.join(result.rsplit('\n}\n', 1))
+    result = re.sub(r"module attributes \{transform.with_named_sequence\} \{\s+\}", "", result)
 
-#     return result
+    return result
 
 
 def transform_dialect_vectorise_img2col(code: str, operation_tag: str, tmp_file_path: str):
@@ -506,6 +507,15 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
             new_code = transform_dialect_vectorise_img2col(code, state.operation_tag, tmp_file)
         else:
             new_code = transform_dialect_vectorise(code, state.operation_tag, tmp_file)
+    
+    elif transformation == "fusion":
+        if state.operation_index > 0:
+            next_operation_tag = bench_features.operation_tags[state.operation_index - 1]
+            new_code = transform_dialect_fusion(code, state.operation_tag, next_operation_tag, tmp_file)
+            
+        else:
+            new_code = code
+
     elif transformation == 'no_transformation':
         new_code = code
     else:

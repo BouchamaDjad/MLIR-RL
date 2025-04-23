@@ -205,22 +205,43 @@ class HiearchyModel(nn.Module):
         D = cfg.max_num_load_store_dim
         SD = cfg.max_num_stores_loads
         self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate + 6 # TODO: rechange it once the observation vector is finalized
+        self.comp_embed_layer_sizes=[600, 350, 200, 180]
+        self.drops=[0.225, 0.225, 0.225, 0.225]
         self.num_loops = L
         self.num_transformations = cfg.num_transformations
         self.num_tiles = cfg.num_tile_sizes
-
+        
+        self.embedding_size = self.comp_embed_layer_sizes[-1]
+        
+        concat_layer_sizes = [
+            embedding_size * 2  # i changed it to *2 only because we dont have the loop_tensor_vector
+        ] + comp_embed_layer_sizes[-2:]
+        
+        self.concat_layers = nn.ModuleList()
+        self.concat_dropouts = nn.ModuleList()
+        
+        
         self.action_mask_size = self.num_transformations + self.num_loops + self.num_loops + 3 * self.num_loops - 6
         
         self.no_comps_tensor = nn.Parameter(torch.randn(1, embedding_size) * 0.01)
         self.no_nodes_tensor = nn.Parameter(torch.randn(1, embedding_size) * 0.01)
         
+        
+        for i in range(len(concat_layer_sizes) - 1):
+            self.concat_layers.append(
+                nn.Linear(concat_layer_sizes[i], concat_layer_sizes[i + 1], bias=True)
+            )
+            self.concat_dropouts.append(nn.Dropout(drops[i]))
+            
+        self.ELU = nn.ELU()
+        
         self.comps_lstm = nn.LSTM(
-            comp_emb_size, embedding_size, batch_first=True
+            comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
         
         # LSTM to encode child loop levels
         self.nodes_lstm = nn.LSTM(
-            comp_emb_size, embedding_size, batch_first=True
+            comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
         
         
@@ -282,17 +303,11 @@ class HiearchyModel(nn.Module):
                 -1, 
                 -1
             )
-        # Get the loop vector for this level
-        selected_loop_tensor = torch.index_select(
-            loops_tensor, 
-            1, 
-            node["loop_index"].to(self.device)
-        )
+            
         # Concatinate the loop vector, computations embedding and nodes (child loops) embedding
-        x = torch.cat((nodes_h_n, comps_h_n, selected_loop_tensor), 2)
+        x = torch.cat((nodes_h_n, comps_h_n), 2)
         # Pass the concatinated vector through a feed forward neural network
         
-        ## TODO : make the concat layers work
         
         for i in range(len(self.concat_layers)):
             x = self.concat_layers[i](x)

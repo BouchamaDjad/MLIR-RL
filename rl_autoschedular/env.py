@@ -10,9 +10,11 @@ from typing import Optional, Literal
 from rl_autoschedular import config as cfg
 from rl_autoschedular.state import OperationState, BenchmarkFeatures
 from rl_autoschedular.observation import (
+    __inline,
     build_loops_tree_using_lowering,
     extract_bench_features_from_file,
     extract_bench_features_from_code,
+    extract_function,
     extract_op_features_from_affine_code,
     build_op_features_vector
 )
@@ -44,6 +46,14 @@ def get_operation_type(raw_operation):
         operation_type = 'func.call'
 
     return operation_type
+
+def fix(code: str, tmp_file_path) -> str:
+    if "myFunction" not in code:
+        return code
+
+    # code = code.replace("func.func private @myFunction", "func.func @myFunction")
+    code = __inline(code, tmp_file_path)
+    return code
 
 class Env:
     """Environment for training the reinforcement learning agent."""
@@ -108,6 +118,8 @@ class Env:
             for i in tqdm(range(len(json_data))):
                 # Get full MLIR code and execution time
                 code = json_data[i][1]["transform_wrapped_operation"]
+                code = fix(code,self.tmp_file)
+                code = extract_function(code)
                 exec_time = json_data[i][1]["execution_time"]
                 # Build benchmark features
                 bench_name = f"bench_{i}"
@@ -202,8 +214,8 @@ class Env:
         )
 
         obs = self.get_obs(state)
-        obs = torch.tensor(obs, dtype=torch.float32)
-        obs = torch.unsqueeze(obs, 0)
+        # obs = torch.tensor(obs, dtype=torch.float32)
+        # obs = torch.unsqueeze(obs, 0)
 
         return state, obs
 
@@ -549,22 +561,25 @@ class Env:
             np.ndarray: observation vector of the state.
         """
 
-        op_features_vector = build_op_features_vector(state.operation_features)
+        # op_features_vector = build_op_features_vector(state.operation_features)
 
-        action_history = state.actions.reshape(-1)
-        action_mask = state.actions_mask
+        # action_history = state.actions.reshape(-1)
+        # action_mask = state.actions_mask
 
-        obs = np.concatenate((
-            # The input of the policy network:
-            op_features_vector,      # MAX_NUM_LOOPS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM*MAX_NUM_STORES_LOADS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM + 5
+        # obs = np.concatenate((
+        #     # The input of the policy network:
+        #     op_features_vector,      # MAX_NUM_LOOPS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM*MAX_NUM_STORES_LOADS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM + 5
             
-            action_history,  # MAX_NUM_LOOPS*3*CONFIG["truncate"]
+        #     action_history,  # MAX_NUM_LOOPS*3*CONFIG["truncate"]
 
-            # The action mask:
-            action_mask     # 5 + MAX_NUM_LOOPS + MAX_NUM_LOOPS + (MAX_NUM_LOOPS-1) + (MAX_NUM_LOOPS-2) + (MAX_NUM_LOOPS-3)
-        ))
+        #     # The action mask:
+        #     action_mask     # 5 + MAX_NUM_LOOPS + MAX_NUM_LOOPS + (MAX_NUM_LOOPS-1) + (MAX_NUM_LOOPS-2) + (MAX_NUM_LOOPS-3)
+        # ))
 
-        return obs
+        curr_tree = state.code_trees[state.operation_index]
+        prev_tree = state.code_trees[state.operation_index - 1] if state.operation_index  >= 1 else None
+
+        return curr_tree,prev_tree
 
     # TODO: Make sure of fusion initial mask
     def initialize_action_mask(self, num_loops: int, operation_type: str):

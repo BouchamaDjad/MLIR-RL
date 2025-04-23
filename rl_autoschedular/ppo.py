@@ -43,8 +43,8 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         Trajectory: The collected trajectory.
     """
 
-    batch_state, batch_obs = env.reset()
-    batch_obs = [obs.to(device) for obs in batch_obs]
+    batch_state, batch_obs = env.reset(idx=33)
+    # batch_obs = [obs.to(device) for obs in batch_obs]
 
     stored_state: list[OperationState] = []
     stored_action_index: list[tuple[str, list[int]]] = []
@@ -57,7 +57,7 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
     # for i in tqdm(range(len_trajectory)):
     for i in range(len_trajectory):
 
-        x = torch.cat(batch_obs)
+        x = batch_obs[0] # bricole
         with torch.no_grad():
             action_index, action_log_p, values, entropy = model.sample(x)
             # TODO: Look into removing the following code (repetition of model.sample call for no obvious reason )

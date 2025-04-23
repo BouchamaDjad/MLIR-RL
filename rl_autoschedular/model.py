@@ -207,7 +207,7 @@ class HiearchyModel(nn.Module):
         SD = cfg.max_num_stores_loads
         self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate + 6 # TODO: rechange it once the observation vector is finalized
         
-        self.comp_embed_layer_sizes=[600, 350, 200, 180]
+        self.comp_embed_layer_sizes=[600, 350, 200, 411] # 411 = 1 + L + L * D * SD + L * D + 5 + 6
         self.drops=[0.225, 0.225, 0.225, 0.225]        
         self.num_loops = L
         self.num_transformations = cfg.num_transformations
@@ -294,11 +294,11 @@ class HiearchyModel(nn.Module):
             nodes_h_n = torch.unsqueeze(self.no_nodes_tensor, 0).expand(
                 1, -1, -1
             )
-        if node.vector:
+        if node.vector is not None:
             # If there are computations contained in this loop, pass them through the computations LSTM
             
             lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
-                node.vector
+                torch.unsqueeze(torch.tensor(node.vector,dtype=torch.float32),dim=0)
             )
             comps_h_n = comps_h_n.permute(1, 0, 2)
         else: # If there are no child computations contained within this level
@@ -321,6 +321,7 @@ class HiearchyModel(nn.Module):
        
        
        ## TODO : update the sample method to accept the nodes (or the final vector im not sure how exactly this is gonna work)
+    
     def sample(self, obs: tuple[LoopNode, LoopNode], actions: Optional[list[tuple[str, list[int]]]] = None):
         """Sample an action from the model.
 

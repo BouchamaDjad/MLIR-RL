@@ -1122,7 +1122,7 @@ def softmax(*args,dim=3):
 """
 
     additional_function = (f"""
-    func.func private @softmax(%input: tensor<{SHAPE}>, %output: tensor<{SHAPE}>) -> tensor<{SHAPE}>{{
+    func.func private @softmax(%input: tensor<{SHAPE}>, %output: tensor<{SHAPE}>) -> tensor<{SHAPE}> attributes {{ "func.inline" = unit }} {{
     %zero = arith.constant 0.00000e+00 : f32
     // Allocate temporary tensors for max and sum computations\n"""
     f"""%tmp_max = bufferization.alloc_tensor() : tensor<{Fill_SHAPE}>\n""" 

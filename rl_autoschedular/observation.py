@@ -12,7 +12,29 @@ from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, Benchm
 
 
 # ================================================ Tree vecteur functions ========================================
+def extract_function(code: str) -> str:
+    if "myFunction" not in code:
+        return code
 
+    lines = code.split("\n")
+    stack = 0
+    start = False
+    start_index = 0
+    end_index = 0
+
+    for i, line in enumerate(lines):
+        if "myFunction" in line and not start:
+            start_index = i
+            start = True
+            stack = line.count("{") - line.count("}")
+        elif start:
+            stack += line.count("{") - line.count("}")
+            if stack == 0:
+                end_index = i
+                break
+
+    return "\n".join(lines[start_index:end_index + 1])
+            
 def build_loops_tree(file_path):
     
     with open(file_path, 'r', encoding='utf-8') as file:
@@ -39,10 +61,12 @@ def build_loops_tree(file_path):
 
     print(pre_nodes_maps)
 
-    tree = parse_affine_loops(lines)
-    process_tree(tree, pre_nodes_maps)
+    lines = extract_function(file_content).split("\n")
+    trees = parse_affine_loops(lines)
+    for tree in trees: 
+        process_tree(tree, pre_nodes_maps)
     
-    return tree
+    return trees
 
 def build_loops_tree_using_lowering(content: str, tmp_path: str):  
     content = __lower_linalg_to_loops(content, tmp_path)
@@ -58,7 +82,7 @@ def build_loops_tree_using_lowering(content: str, tmp_path: str):
     return tree
 
 
-def parse_affine_loops(lines):
+def parse_affine_loops(lines) -> list[LoopNode]:
     stack = []
     root_nodes = []
     collecting = False
@@ -96,7 +120,7 @@ def parse_affine_loops(lines):
         if "}" in stripped and stack:
             stack.pop()
 
-    return root_nodes[0] #return the first one for now
+    return root_nodes
     
 
 def process_tree(node, maps = None):
@@ -342,6 +366,7 @@ def extract_op_features_from_affine_code(raw_operation: str, tmp_file_path: str,
     """
     # Get code as affine loops
     wrapped_operation = __function_wrapper(raw_operation,maps,additional_function)
+    # wrapped_operation = __inline(wrapped_operation, tmp_file_path)
     loops = __lower_linalg_to_loops(wrapped_operation, tmp_file_path)
     lines = loops.split('\n') if loops else []
 
@@ -751,7 +776,7 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
         exec_time=execution_time
     )
 
-def __transform_wrapper(operation, maps: Optional[str]=None, additional_function: Optional[str] = None):
+def transform_wrapper(operation, maps: Optional[str]=None, additional_function: Optional[str] = None):
 
     ins_outs_pattern = "(?:ins|outs)\s*\(([^())]+)\)"
     fields = re.findall(ins_outs_pattern, operation)
@@ -892,3 +917,16 @@ def __transform_wrapper(operation, maps: Optional[str]=None, additional_function
     code += "}\n"
 
     return code
+
+def __inline(code: str, tmp_file_path: str):
+    # Write the MLIR code to a temporary file
+    with open(tmp_file_path, "w") as file:
+        file.write(code)
+
+    # Lower the Linalg dialect code to Affine dialect
+    out = os.popen(f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt --inline {tmp_file_path}").read()
+
+    if out != '':
+        return out
+    else:
+        return None

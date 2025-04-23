@@ -179,16 +179,15 @@ class Env:
         # Action history:
         # 3 because we have 3 transformations that require parameters: TP, T, I
         actions = np.zeros((cfg.max_num_loops, 3, cfg.truncate,))
-        
-        # TODO: fix build tree issue
-        # tree = build_loops_tree_with_lowering(benchmark_data.code, self.tmp_file)
-        # print_info(f"{tree=}")
+
+        tree = build_loops_tree_using_lowering(benchmark_data.code, self.tmp_file)
+        print_info(f"{tree=}")
 
         state = OperationState(
             bench_name=bench_name,
             operation_tag=operation_tag,
             operation_index =operation_index,
-            code_tree=None,# tree,
+            code_trees=tree,
             operation_type=operation_type,
             operation_features=operation_features,
             transformed_code=benchmark_data.code,
@@ -269,7 +268,7 @@ class Env:
                     bench_name=state.bench_name,
                     operation_tag=state.operation_tag,
                     operation_index=state.operation_index,
-                    code_tree=state.code_tree,
+                    code_trees=state.code_trees,
                     operation_type='conv_2d+img2col',  # The operation type changes
                     operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
                     transformed_code=state.transformed_code,
@@ -288,9 +287,9 @@ class Env:
                 new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
                 self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
 
-                # new_tree = build_loops_tree_with_lowering(new_bench_data.code, self.tmp_file)
-                # state.code_tree = new_tree
-                # print_info(f"{new_tree=}")
+                new_tree = build_loops_tree_using_lowering(new_bench_data.code, self.tmp_file)
+                state.code_trees = new_tree
+                print_info(f"{new_tree=}")
             
 
         else:  # transformation == 'no_transformation' or 'vectorization'
@@ -370,7 +369,7 @@ class Env:
                 bench_name=state.bench_name,
                 operation_tag=state.operation_tag,
                 operation_index=state.operation_index,
-                code_tree=state.code_tree,
+                code_trees=state.code_trees,
                 operation_type=state.operation_type,
                 operation_features=state.operation_features,
                 transformed_code=transformed_code,  # New transformed code
@@ -430,7 +429,7 @@ class Env:
                         bench_name=bench_name,
                         operation_tag=new_op_tag,
                         operation_index=operation_index,
-                        code_tree=state.code_tree,
+                        code_trees=state.code_trees,
                         operation_type=new_operation_type,
                         operation_features=new_op_features,
                         transformed_code=new_bench_data.code,
@@ -698,7 +697,7 @@ class Env:
         # actions.shape: (L, 3, truncate)
         # parallelization, tiling, interchange
 
-        num_loops = len(state.operation_features.nested_loops)
+        num_loops = min(cfg.max_num_loops,len(state.operation_features.nested_loops))
         actions = state.actions
         assert state.step_count < state.actions.shape[2] # comparing to `truncate`
 

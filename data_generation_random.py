@@ -4,8 +4,9 @@ from utils.log import print_info
 load_dotenv(override=True)
 
 from rl_autoschedular.observation import (
+    __inline,
     extract_op_features_from_affine_code,
-    __transform_wrapper
+    transform_wrapper
 )
 from rl_autoschedular.evaluation import evaluate_code_with_cmd_and_timeout
 from random import randint, choice, shuffle, random
@@ -15,7 +16,7 @@ import numpy as np
 import yaml
 from dataclasses import asdict
 import argparse
-from utils.generation import LINALG_OPERATION_GENERATORS,BATCH_SIZES,HEIGHTS,CHANNELS,KERNELS,DILATIONS,STRIDES,SIZES,randomSubGraph
+from utils.generation import LINALG_OPERATION_GENERATORS,BATCH_SIZES,HEIGHTS,CHANNELS,KERNELS,DILATIONS,STRIDES,SIZES,randomSubGraph,softmax
 
 tmp_file = 'tmp/temp_mlir.mlir'
 
@@ -35,7 +36,7 @@ if __name__ == '__main__':
 
     # print_info(args.input_file,args.output_file)
 
-    # args = ParserMock(input_file="config/config.yaml",output_file="t.json")
+    args = ParserMock(input_file="config/config.yaml",output_file="t.json")
     
     with open(args.input_file, 'r') as file:
         config = yaml.safe_load(file)
@@ -54,7 +55,7 @@ if __name__ == '__main__':
     # }
 
     operations_config = {
-        "randomSubGraph": (randomSubGraph, 300)
+        "randomSubGraph": (softmax, 1)
     }
 
     # print( sum( amount for _, (_, amount) in operations_config.items() ) )
@@ -94,7 +95,8 @@ if __name__ == '__main__':
                 loops_data.pop("raw_operation")  # Remove raw_operation
                 
                 
-                transform_wrapped_operation = __transform_wrapper(raw_operation, maps=maps, additional_function=additional_function)
+                transform_wrapped_operation = transform_wrapper(raw_operation, maps=maps, additional_function=additional_function)
+                transform_wrapped_operation = __inline(transform_wrapped_operation, tmp_file)
 
                 # Evaluate the execution time of the transformed operation with a timeout of 300 seconds
                 exec_time, assertion = evaluate_code_with_cmd_and_timeout(transform_wrapped_operation, tmp_file, 300)

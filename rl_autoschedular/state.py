@@ -80,8 +80,9 @@ class OperationState:
     """The type of the operation (generic, matmul, conv2d, ...)."""
     operation_features: OperationFeatures
     """Features of the operation."""
-    code_tree: LoopNode
-    """The Tree structure of the code at the current state"""
+    code_trees: list[LoopNode]
+    """The Tree structure of the code at the current state (contains possibly multiple trees)"""
+
     transformed_code: str
     """The operation string with wrapping and transformations."""
     actions: np.ndarray

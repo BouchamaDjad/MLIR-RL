@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from typing import Optional
 from rl_autoschedular import config as cfg
+from rl_autoschedular.state import LoopNode
 
 def initialization_function_xavier(x):
     return nn.init.xavier_uniform_(x)
@@ -205,8 +206,9 @@ class HiearchyModel(nn.Module):
         D = cfg.max_num_load_store_dim
         SD = cfg.max_num_stores_loads
         self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate + 6 # TODO: rechange it once the observation vector is finalized
+        
         self.comp_embed_layer_sizes=[600, 350, 200, 180]
-        self.drops=[0.225, 0.225, 0.225, 0.225]
+        self.drops=[0.225, 0.225, 0.225, 0.225]        
         self.num_loops = L
         self.num_transformations = cfg.num_transformations
         self.num_tiles = cfg.num_tile_sizes
@@ -215,7 +217,7 @@ class HiearchyModel(nn.Module):
         
         concat_layer_sizes = [
             embedding_size * 2  # i changed it to *2 only because we dont have the loop_tensor_vector
-        ] + comp_embed_layer_sizes[-2:]
+        ] + self.comp_embed_layer_sizes[-2:]
         
         self.concat_layers = nn.ModuleList()
         self.concat_dropouts = nn.ModuleList()
@@ -231,21 +233,21 @@ class HiearchyModel(nn.Module):
             self.concat_layers.append(
                 nn.Linear(concat_layer_sizes[i], concat_layer_sizes[i + 1], bias=True)
             )
-            self.concat_dropouts.append(nn.Dropout(drops[i]))
+            self.concat_dropouts.append(nn.Dropout(self.drops[i]))
             
         self.ELU = nn.ELU()
         
         self.comps_lstm = nn.LSTM(
-            comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
         
         # LSTM to encode child loop levels
         self.nodes_lstm = nn.LSTM(
-            comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
         
         self.roots_lstm = nn.LSTM(
-            comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
         
         
@@ -279,8 +281,7 @@ class HiearchyModel(nn.Module):
         nodes_list = []
         for n in node.children:
             # Recusrive call to embed all the children of the loop first if they exist
-            nodes_list.append(self.get_hidden_state(
-                n))
+            nodes_list.append(self.get_hidden_state(n))
         
         if nodes_list != []:
             # Pass the embedding of all the child loops through the nodes LSTM
@@ -362,6 +363,9 @@ class HiearchyModel(nn.Module):
         I_BEGIN_2C = T_BEGIN + L
         # I_BEGIN_3C = I_BEGIN_2C + (L - 1)
         # I_BEGIN_4C = I_BEGIN_3C + (L - 2)
+
+        # TODO: make action_mask an argument
+        action_mask = torch.ones((*leading_dims, self.action_mask_size), dtype=torch.bool, device=x.device)
 
         # Define the mask of each transformation
         transform_mask = action_mask[..., :self.num_transformations]

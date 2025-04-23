@@ -211,7 +211,7 @@ class HiearchyModel(nn.Module):
         self.num_transformations = cfg.num_transformations
         self.num_tiles = cfg.num_tile_sizes
         
-        self.embedding_size = self.comp_embed_layer_sizes[-1]
+        embedding_size = self.comp_embed_layer_sizes[-1]
         
         concat_layer_sizes = [
             embedding_size * 2  # i changed it to *2 only because we dont have the loop_tensor_vector
@@ -241,6 +241,10 @@ class HiearchyModel(nn.Module):
         
         # LSTM to encode child loop levels
         self.nodes_lstm = nn.LSTM(
+            comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+        )
+        
+        self.roots_lstm = nn.LSTM(
             comp_embed_layer_sizes[-1], embedding_size, batch_first=True
         )
         
@@ -287,7 +291,7 @@ class HiearchyModel(nn.Module):
         else: # If there are no child loops contained within this level
             # The nodes embedding is a random vector (no_nodes_tensor) that represents that there are no nodes underneath this level
             nodes_h_n = torch.unsqueeze(self.no_nodes_tensor, 0).expand(
-                comp_emb_size, -1, -1
+                1, -1, -1
             )
         if node.vector:
             # If there are computations contained in this loop, pass them through the computations LSTM
@@ -299,7 +303,7 @@ class HiearchyModel(nn.Module):
         else: # If there are no child computations contained within this level
             # The computations embedding is a random vector (no_comps_tensor) that represents that there are no computations underneath this level
             comps_h_n = torch.unsqueeze(self.no_comps_tensor, 0).expand(
-                comp_emb_size, 
+                1, # i changed it to 1 for now
                 -1, 
                 -1
             )
@@ -316,11 +320,11 @@ class HiearchyModel(nn.Module):
        
        
        ## TODO : update the sample method to accept the nodes (or the final vector im not sure how exactly this is gonna work)
-    def sample(self, obs: torch.Tensor, actions: Optional[list[tuple[str, list[int]]]] = None):
+    def sample(self, obs: tuple[LoopNode, LoopNode], actions: Optional[list[tuple[str, list[int]]]] = None):
         """Sample an action from the model.
 
         Args:
-            obs (torch.Tensor): The input tensor.
+            obs (tuple[LoopNode, LoopNode]): the input representing the current and previous loops.
             actions (Optional[list[tuple[str, list[int]]]]): list of actions forced for the model to return. Defaults to None.
 
         Returns:
@@ -329,12 +333,24 @@ class HiearchyModel(nn.Module):
             torch.Tensor: action values.
             torch.Tensor: resulting entropy.
         """
-
+        
+        current_tree, previous_tree = obs
+        
+        current_obs = self.get_hidden_state(current_tree)
+        previous_obs = self.get_hidden_state(previous_tree)
+        
+        roots_tensor = torch.cat([current_obs,previous_obs], 1)
+        
+        lstm_out, (roots_h_n, roots_c_n) = self.roots_lstm(roots_tensor)
+        roots_h_n = roots_h_n.permute(1, 0, 2)
+        
+        x = roots_h_n
+        
         *leading_dims, _ = obs.shape
 
         # Spint `obs` into the input `x` and the `action_mask`
-        x = obs[..., :-(self.action_mask_size)]
-        action_mask = obs[..., -(self.action_mask_size):].bool()
+        # x = obs[..., :-(self.action_mask_size)]
+        # action_mask = obs[..., -(self.action_mask_size):].bool()
 
         # print(action_mask)
 

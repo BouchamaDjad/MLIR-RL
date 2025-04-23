@@ -179,7 +179,7 @@ class Env:
         # Action history:
         # 3 because we have 3 transformations that require parameters: TP, T, I
         actions = np.zeros((cfg.max_num_loops, 3, cfg.truncate,))
-
+        
         # TODO: fix build tree issue
         # tree = build_loops_tree_with_lowering(benchmark_data.code, self.tmp_file)
         # print_info(f"{tree=}")

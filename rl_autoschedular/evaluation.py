@@ -168,6 +168,31 @@ def evaluate_code_with_cmd(code: str, tmp_file_path: str):
     else:
         return None, False
 
+def evaluate_transform_with_cmd(code: str, tmp_file_path: str):
+    """Only lowers the given MLIR code using MLIR opt, then returns the new code.
+
+    Args:
+        code (str): The MLIR code to run.
+        tmp_file_path (str): The temporary file path to write the MLIR code.
+
+    Returns:
+        Optional[str]: the new code.
+    """
+    command_1 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt  -loop-invariant-code-motion -cse -canonicalize -cse -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize='bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map' -buffer-deallocation -scf-forall-to-parallel -convert-linalg-to-loops  -convert-vector-to-scf -convert-scf-to-openmp -expand-strided-metadata -finalize-memref-to-llvm -canonicalize -lower-affine -expand-strided-metadata -finalize-memref-to-llvm -convert-scf-to-cf -lower-affine -convert-arith-to-llvm -convert-openmp-to-llvm -convert-vector-to-llvm -convert-cf-to-llvm -convert-func-to-llvm -convert-math-to-llvm -reconcile-unrealized-casts"
+    # command_2 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-cpu-runner -e main -entry-point-result=void -shared-libs={os.getenv('LLVM_BUILD_PATH')}/lib/libmlir_runner_utils.so,{os.getenv('LLVM_BUILD_PATH')}/lib/libmlir_c_runner_utils.so,{os.getenv('LLVM_BUILD_PATH')}/lib/libomp.so"
+
+    os.environ["OMP_NUM_THREADS"] = "8"
+
+    with open(tmp_file_path, "w") as file:
+        file.write(code)
+
+    out = os.popen(f"""{command_1} {tmp_file_path}""").read()
+
+    if out:
+        return out 
+    else:
+        return None # maybe make it return code
+
 
 def evaluate_code_with_cmd_wrapper(code: str, tmp_file_path: str, exec_times, assertions):
     """Wrapper function for evaluate_code_with_cmd to be used in multiprocessing.

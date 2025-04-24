@@ -119,7 +119,7 @@ class Env:
                 # Get full MLIR code and execution time
                 code = json_data[i][1]["transform_wrapped_operation"]
                 code = fix(code,self.tmp_file)
-                code = extract_function(code)
+                # code = extract_function(code)
                 exec_time = json_data[i][1]["execution_time"]
                 # Build benchmark features
                 bench_name = f"bench_{i}"

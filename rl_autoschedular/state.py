@@ -3,18 +3,17 @@ from typing import Literal
 import numpy as np
 
 class LoopNode:
-    def __init__(self, var_name,upper,lower, parent):
-        self.var_name = var_name
+    def __init__(self, arg, upper,lower, parent):
+        self.arg = arg
         self.upper = upper
         self.lower = lower
-        self.instructions = []  # lines inside the loop (including inner loops)
         self.children = []
         self.parent = parent
         self.vector = None
 
     def __repr__(self, level=0):
         indent = "  " * level
-        result = f"{indent}- {self.var_name}\n"
+        result = f"{indent}- {self.arg}\n"
         for line in self.instructions:
             result += f"{indent}    {line.strip()}\n"
         for child in self.children:
@@ -49,6 +48,8 @@ class OperationFeatures:
     """List of store accesses where each store is represented by the list of access arguments."""
     nested_loops: list[NestedLoopFeatures]
     """List of nested loops where each loop is represented by the NestedLoopFeatures dataclass."""
+    producers: list[str]
+    """List of producers for an operation"""
 
 
 @dataclass
@@ -80,9 +81,12 @@ class OperationState:
     """The type of the operation (generic, matmul, conv2d, ...)."""
     operation_features: OperationFeatures
     """Features of the operation."""
-    code_trees: list[LoopNode]
-    """The Tree structure of the code at the current state (contains possibly multiple trees)"""
-
+    current_producer: int
+    "index of the current producer"
+    producer_tag: str
+    "tag of the producer operation"
+    producer_features: OperationFeatures
+    "Features of the producer operation"
     transformed_code: str
     """The operation string with wrapping and transformations."""
     actions: np.ndarray

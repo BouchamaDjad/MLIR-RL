@@ -296,10 +296,13 @@ class HiearchyModel(nn.Module):
             )
         if node.vector is not None:
             # If there are computations contained in this loop, pass them through the computations LSTM
-            
+            print(vector.shape)
             lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
-                torch.unsqueeze(torch.tensor(node.vector,dtype=torch.float32),dim=0)
+                torch.tensor(node.vector, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
             )
+            
+            print(comps_h_n.shape)
+            print(comps_c_n.shape)
             comps_h_n = comps_h_n.permute(1, 0, 2)
         else: # If there are no child computations contained within this level
             # The computations embedding is a random vector (no_comps_tensor) that represents that there are no computations underneath this level

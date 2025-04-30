@@ -2,6 +2,7 @@ import numpy as np
 import re
 from typing import Optional
 import os
+from collections import defaultdict
 from copy import copy
 import subprocess
 from rl_autoschedular import config as cfg
@@ -213,6 +214,46 @@ def extract_op_features_from_affine_code_tree(node, maps = None):
         store_data=store_data,
         nested_loops=nested_loops
     )
+    
+    
+
+def build_loop_tree_from_ast(loop_features: list[NestedLoopFeatures], feature_vector) -> LoopNode:
+    parent = None
+    root = None
+    
+    
+    if len(loop_features) == 0:
+        root = LoopNode(
+            arg=None,
+            lower=0,
+            upper=1,
+            parent=None
+        )
+        
+        root.vector = feature_vector
+        
+        return root
+        
+
+    for feature in loop_features:
+        node = LoopNode(
+            arg=feature.arg,
+            lower=feature.lower_bound,
+            upper=feature.upper_bound,
+            parent=parent
+        )
+        
+        node.vector = feature_vector
+
+        if parent is not None:
+            parent.children.append(node)
+        else:
+            root = node  # First node is the root
+
+        parent = node  # Next node will be child of current
+
+    return root
+
 
 # ==================================================== end of tree vecteur functions ===================================
 
@@ -492,67 +533,67 @@ def extract_bench_features_from_file(bench_name: str, file_path: str, root_execu
     return __extract_bench_features_from_ast_result(bench_name, raw_ast_info, root_execution_time, execution_time)
 
 
-# def get_raw_ast_info(code: str, tmp_file_path: str):
-#     """Get the raw AST information from the code
+def get_raw_ast_info(code: str, tmp_file_path: str):
+    """Get the raw AST information from the code
 
-#     Args:
-#         code (str): the code to get the AST information from
-#         tmp_file_path (str): the temporary file path to write the code to
+    Args:
+        code (str): the code to get the AST information from
+        tmp_file_path (str): the temporary file path to write the code to
 
-#     Returns:
-#         str: the raw AST information
-#     """
+    Returns:
+        str: the raw AST information
+    """
 
-#     with open(tmp_file_path, "w") as file:
-#         file.write(code)
+    with open(tmp_file_path, "w") as file:
+        file.write(code)
 
-#     result = subprocess.run(
-#         f'{os.getenv("AST_DUMPER_BIN_PATH")} {tmp_file_path}',
-#         shell=True,
-#         stdout=subprocess.PIPE,
-#         stderr=subprocess.PIPE
-#     )
+    result = subprocess.run(
+        f'{os.getenv("AST_DUMPER_BIN_PATH")} {tmp_file_path}',
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
 
-#     return result.stdout.decode('utf-8')
+    return result.stdout.decode('utf-8')
 
 
-# def get_ast(raw_ast_info: str):
-#     """Get the AST from the raw AST information
+def get_ast(raw_ast_info: str):
+    """Get the AST from the raw AST information
 
-#     Args:
-#         raw_ast_info (str): the raw AST information
+    Args:
+        raw_ast_info (str): the raw AST information
 
-#     Returns:
-#         dict: containing for each consumer operation, the producers and the operation
-#         str: new code with tags
-#     """
+    Returns:
+        dict: containing for each consumer operation, the producers and the operation
+        str: new code with tags
+    """
 
-#     info, new_code = raw_ast_info.split("########################################")
-#     operations_lines, graph_lines = info.split('#BEGIN_GRAPH')
+    info, new_code = raw_ast_info.split("########################################")
+    operations_lines, graph_lines = info.split('#BEGIN_GRAPH')
 
-#     operations_blocks = operations_lines.split('#START_OPERATION')
-#     operations_blocks = [block.strip() for block in operations_blocks if block]
+    operations_blocks = operations_lines.split('#START_OPERATION')
+    operations_blocks = [block.strip() for block in operations_blocks if block]
 
-#     ast = {}
-#     for block in operations_blocks:
-#         block_lines = block.split('\n')
+    ast = {}
+    for block in operations_blocks:
+        block_lines = block.split('\n')
 
-#         operation_tag = block_lines[-2]
-#         operation = '\n'.join(block_lines[:-3])
-#         operation = operation.split("#START_NESTED_LOOPS")[0]
+        operation_tag = block_lines[-2]
+        operation = '\n'.join(block_lines[:-3])
+        operation = operation.split("#START_NESTED_LOOPS")[0]
 
-#         ast[operation_tag] = {
-#             'producers': [],
-#             'operation': operation
-#         }
+        ast[operation_tag] = {
+            'producers': [],
+            'operation': operation
+        }
 
-#     graph_lines = graph_lines.split('\n')
-#     graph_lines = [line.split(' --> ') for line in graph_lines if ' --> ' in line]
+    graph_lines = graph_lines.split('\n')
+    graph_lines = [line.split(' --> ') for line in graph_lines if ' --> ' in line]
 
-#     for (producer, consumer) in graph_lines:
-#         ast[consumer]['producers'].insert(0, producer)
+    for (producer, consumer) in graph_lines:
+        ast[consumer]['producers'].insert(0, producer)
 
-#     return ast, new_code.strip()
+    return ast, new_code.strip()
 
 
 # ================================================ Private functions ================================================
@@ -714,7 +755,7 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
     """
     info, full_code = raw_ast_info.split("########################################")
     # exec_time = lower_and_run_code(full_code)
-    operations_lines, _ = info.split('#BEGIN_GRAPH')
+    operations_lines, graph_lines = info.split('#BEGIN_GRAPH')
 
     operations_blocks = operations_lines.split('#START_OPERATION')
     operations_blocks = [block.strip() for block in operations_blocks if block]
@@ -764,9 +805,23 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
             op_count=op_count,
             load_data=load_data,
             store_data=store_data,
-            nested_loops=nested_loops
+            nested_loops=nested_loops,
+            producers = []
         )
+        
+    graph_lines = graph_lines.split('\n')
+    graph_lines = [line.split(' --> ') for line in graph_lines if ' --> ' in line]
+    
+    op_producers = defaultdict(lambda: {'producers': []})
 
+    for producer, consumer in graph_lines:
+        op_producers[consumer]['producers'].insert(0, producer)
+    
+    for tag, info in op_producers.items():
+        if tag in operations:
+            operations[tag].producers = info['producers']
+    
+        
     return BenchmarkFeatures(
         bench_name=bench_name,
         code=full_code,

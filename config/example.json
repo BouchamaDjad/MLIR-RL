@@ -3,12 +3,12 @@
     "max_num_loops": 7,
     "max_num_load_store_dim": 7,
     "num_tile_sizes": 7,
-    "num_transformations": 6,
+    "num_transformations": 7,
     "vect_size_limit": 2048,
     "use_bindings": false,
     "use_vectorizer": false,
     "data_format": "json",
-    "optimization_mode": "last",
+    "optimization_mode": "all",
     "benchmarks_folder_path": "",
     "len_trajectory": 64,
     "ppo_batch_size": 64,
@@ -17,7 +17,7 @@
     "entropy_coef": 0.01,
     "lr": 0.001,
     "truncate": 5,
-    "json_file": "data/nn/train_operations.json",
+    "json_file": "operation-sequence-3.json",
     "tags": ["nn"],
     "logging": true
 }

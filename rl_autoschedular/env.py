@@ -16,7 +16,8 @@ from rl_autoschedular.observation import (
     extract_bench_features_from_code,
     extract_function,
     extract_op_features_from_affine_code,
-    build_op_features_vector
+    build_op_features_vector,
+    build_loop_tree_from_ast
 )
 from rl_autoschedular.transforms import (
     apply_transformation_with_timeout,
@@ -187,19 +188,28 @@ class Env:
         #            : L - 2 for 3-consecutive interchanges
         #            : L - 3 for 4-consecutive interchanges
         actions_mask = self.initialize_action_mask(num_loops, operation_type)
-
+        
+        with open('full_code_with_tags.mlir', 'w', encoding='utf-8') as file:
+            file.write(benchmark_data.code)
+        
         # Action history:
         # 3 because we have 3 transformations that require parameters: TP, T, I
         actions = np.zeros((cfg.max_num_loops, 3, cfg.truncate,))
 
-        tree = build_loops_tree_using_lowering(benchmark_data.code, self.tmp_file)
-        print_info(f"{tree=}")
-
+        if len(operation_features.producers) != 0:
+            producer_tag = operation_features.producers[0]
+            producer_features = benchmark_data.operations[producer_tag]
+        else:
+            producer_tag = None
+            producer_features = None
+            
         state = OperationState(
             bench_name=bench_name,
             operation_tag=operation_tag,
             operation_index =operation_index,
-            code_trees=tree,
+            current_producer = 0,
+            producer_tag = producer_tag,
+            producer_features = producer_features,
             operation_type=operation_type,
             operation_features=operation_features,
             transformed_code=benchmark_data.code,
@@ -561,7 +571,7 @@ class Env:
             np.ndarray: observation vector of the state.
         """
 
-        # op_features_vector = build_op_features_vector(state.operation_features)
+        op_features_vector = build_op_features_vector(state.operation_features)
 
         # action_history = state.actions.reshape(-1)
         # action_mask = state.actions_mask
@@ -575,11 +585,16 @@ class Env:
         #     # The action mask:
         #     action_mask     # 5 + MAX_NUM_LOOPS + MAX_NUM_LOOPS + (MAX_NUM_LOOPS-1) + (MAX_NUM_LOOPS-2) + (MAX_NUM_LOOPS-3)
         # ))
+        curr_tree = build_loop_tree_from_ast(state.operation_features.nested_loops, op_features_vector)
+        
+        if state.producer_tag != None:
+            prod_features_vector = build_op_features_vector(state.producer_features)
+            prod_tree = build_loop_tree_from_ast(state.producer_features.nested_loops,prod_features_vector)
+        else:
+            
+            prod_tree = None
 
-        curr_tree = state.code_trees[state.operation_index]
-        prev_tree = state.code_trees[state.operation_index - 1] if state.operation_index  >= 1 else None
-
-        return curr_tree,prev_tree
+        return curr_tree,prod_tree
 
     # TODO: Make sure of fusion initial mask
     def initialize_action_mask(self, num_loops: int, operation_type: str):

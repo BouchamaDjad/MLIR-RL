@@ -43,7 +43,7 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         Trajectory: The collected trajectory.
     """
 
-    batch_state, batch_obs = env.reset(idx=33)
+    batch_state, batch_obs = env.reset(idx=0)
     # batch_obs = [obs.to(device) for obs in batch_obs]
 
     stored_state: list[OperationState] = []

@@ -191,7 +191,7 @@ def transform_dialect_fusion(code: str, operation_tag: str, next_operation_tag: 
         file.write(code)
 
     result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        f"/scratch/rb5953/llvm-project/build/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
     ).read()
 
     result = result.replace("module {\n", "", 1)

@@ -436,6 +436,14 @@ class Env:
                 raw_operation = new_op_features.raw_operation
                 new_operation_type = get_operation_type(raw_operation)
                 
+                if len(operation_features.producers) != 0:
+                    producer_tag = operation_features.producers[0]
+                    producer_features = benchmark_data.operations[producer_tag]
+                    
+                else:
+                    producer_tag = None
+                    producer_features = None
+                
                 # Skip unknown operations or those with no loops
                 # TODO: figure out what to do with the case where index 0 is unknown
                 while operation_index >= 1 and ( new_operation_type == "unknown" or len(new_op_features.nested_loops) == 0):
@@ -458,9 +466,9 @@ class Env:
                         operation_index=operation_index,
                         operation_type=new_operation_type,
                         operation_features=new_op_features,
-                        current_producer = state.current_producer,
-                        producer_tag = state.producer_tag,
-                        producer_features = state.producer_features,
+                        current_producer = 0,
+                        producer_tag = producer_tag,
+                        producer_features = producer_features,
                         transformed_code=new_bench_data.code,
                         actions=np.zeros((cfg.max_num_loops, 3, cfg.truncate)),
                         actions_mask=actions_mask,

@@ -279,6 +279,8 @@ class HiearchyModel(nn.Module):
     
     def get_hidden_state(self, node):
         nodes_list = []
+        print(node)
+        
         for n in node.children:
             # Recusrive call to embed all the children of the loop first if they exist
             nodes_list.append(self.get_hidden_state(n))

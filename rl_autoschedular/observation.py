@@ -227,23 +227,31 @@ def build_loop_tree_from_ast(loop_features: list[NestedLoopFeatures], feature_ve
             arg=None,
             lower=0,
             upper=1,
+            vector = feature_vector,
             parent=None
         )
         
-        root.vector = feature_vector
-        
         return root
         
-
-    for feature in loop_features:
-        node = LoopNode(
-            arg=feature.arg,
-            lower=feature.lower_bound,
-            upper=feature.upper_bound,
-            parent=parent
-        )
+    nb_loops = len(loop_features)
+    for i,feature in enumerate(loop_features):
         
-        node.vector = feature_vector
+        if i == nb_loops -1:
+            node = LoopNode(
+                arg=feature.arg,
+                lower=feature.lower_bound,
+                upper=feature.upper_bound,
+                vector = feature_vector,
+                parent=parent
+            )
+        else:
+            node = LoopNode(
+                arg=feature.arg,
+                lower=feature.lower_bound,
+                upper=feature.upper_bound,
+                vector = None,
+                parent=parent
+            )
 
         if parent is not None:
             parent.children.append(node)

@@ -3,7 +3,7 @@ from typing import Literal
 import numpy as np
 
 class LoopNode:
-    def __init__(self, arg, upper,lower, parent):
+    def __init__(self, arg, upper,lower, parent,vector):
         self.arg = arg
         self.upper = upper
         self.lower = lower
@@ -14,8 +14,6 @@ class LoopNode:
     def __repr__(self, level=0):
         indent = "  " * level
         result = f"{indent}- {self.arg}\n"
-        for line in self.instructions:
-            result += f"{indent}    {line.strip()}\n"
         for child in self.children:
             result += child.__repr__(level + 1)
         return result

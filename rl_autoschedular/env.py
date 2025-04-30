@@ -207,11 +207,11 @@ class Env:
             bench_name=bench_name,
             operation_tag=operation_tag,
             operation_index =operation_index,
+            operation_type=operation_type,
+            operation_features=operation_features,
             current_producer = 0,
             producer_tag = producer_tag,
             producer_features = producer_features,
-            operation_type=operation_type,
-            operation_features=operation_features,
             transformed_code=benchmark_data.code,
             actions=actions,
             actions_mask=actions_mask,
@@ -290,9 +290,11 @@ class Env:
                     bench_name=state.bench_name,
                     operation_tag=state.operation_tag,
                     operation_index=state.operation_index,
-                    code_trees=state.code_trees,
                     operation_type='conv_2d+img2col',  # The operation type changes
                     operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
+                    current_producer = 0,
+                    producer_tag = producer_tag,
+                    producer_features = producer_features,
                     transformed_code=state.transformed_code,
                     actions=state.actions,
                     actions_mask=state.actions_mask,
@@ -306,12 +308,13 @@ class Env:
 
             elif transformed_code and transformation == "fusion":
                 
-                new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
-                self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
-
-                new_tree = build_loops_tree_using_lowering(new_bench_data.code, self.tmp_file)
-                state.code_trees = new_tree
-                print_info(f"{new_tree=}")
+                if (state.producer_id + 1) < len(state.producer_features.producers):
+                    state.producer_id += 1
+                    state.producer_tag = state.operation_features.producers[state.producer_id]
+                    state.producer_features = benchmark_data.operations[producer_tag]
+                
+                else:
+                    state.producer_tag == None
             
 
         else:  # transformation == 'no_transformation' or 'vectorization'
@@ -391,9 +394,11 @@ class Env:
                 bench_name=state.bench_name,
                 operation_tag=state.operation_tag,
                 operation_index=state.operation_index,
-                code_trees=state.code_trees,
                 operation_type=state.operation_type,
                 operation_features=state.operation_features,
+                current_producer = state.current_producer,
+                producer_tag = state.producer_tag,
+                producer_features = state.producer_features,
                 transformed_code=transformed_code,  # New transformed code
                 actions=next_state_actions,  # New actions
                 actions_mask=new_actions_mask,  # New action mask
@@ -451,9 +456,11 @@ class Env:
                         bench_name=bench_name,
                         operation_tag=new_op_tag,
                         operation_index=operation_index,
-                        code_trees=state.code_trees,
                         operation_type=new_operation_type,
                         operation_features=new_op_features,
+                        current_producer = state.current_producer,
+                        producer_tag = state.producer_tag,
+                        producer_features = state.producer_features,
                         transformed_code=new_bench_data.code,
                         actions=np.zeros((cfg.max_num_loops, 3, cfg.truncate)),
                         actions_mask=actions_mask,

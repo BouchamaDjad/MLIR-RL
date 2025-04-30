@@ -509,9 +509,8 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
             new_code = transform_dialect_vectorise(code, state.operation_tag, tmp_file)
     
     elif transformation == "fusion":
-        if state.operation_index > 0:
-            next_operation_tag = bench_features.operation_tags[state.operation_index - 1]
-            new_code = transform_dialect_fusion(code, state.operation_tag, next_operation_tag, tmp_file)
+        if state.producer_tag is not None:
+            new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, tmp_file)
             
         else:
             new_code = code

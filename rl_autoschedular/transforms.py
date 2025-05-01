@@ -625,7 +625,7 @@ def get_ops_by_tags(code: str, operation_tags: list, tmp_file_path: str):
         tmp_file_path (str): The path to the temporary file to write the code to.
 
     Returns:
-        dict[str, str]: containing for each opeartion tag the corresponding operation.
+        prints (dict[str, str]): containing for each opeartion tag the corresponding operation.
     """
     matchs = '\n'.join([f""" %op_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op """ for operation_tag in operation_tags])
     prints = '\n'.join([f""" transform.print %op_{operation_tag} {{name = "selected_{operation_tag}"}}: !transform.any_op """ for operation_tag in operation_tags])

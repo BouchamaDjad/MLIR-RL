@@ -49,6 +49,8 @@ class OperationFeatures:
     """List of store accesses where each store is represented by the list of access arguments."""
     nested_loops: list[NestedLoopFeatures]
     """List of nested loops where each loop is represented by the NestedLoopFeatures dataclass."""
+    op_trees: list[LoopNode]
+    """"""
 
 
 @dataclass

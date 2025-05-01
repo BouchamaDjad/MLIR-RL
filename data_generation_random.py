@@ -55,73 +55,86 @@ if __name__ == '__main__':
     # }
 
     operations_config = {
-        "randomSubGraph": (softmax, 1)
+        "randomSubGraph": (randomSubGraph, 100)
     }
 
     # print( sum( amount for _, (_, amount) in operations_config.items() ) )
 
-    all_operations = {}
+    for j in range(5):
+        all_operations = {}
 
-    for operation_name, (generator, amount) in tqdm(operations_config.items(), desc="linalg operations"):
+        for operation_name, (generator, amount) in tqdm(operations_config.items(), desc="linalg operations"):
 
-        # Iterate the specified number of times ('amount') for the current operation
-        for i in tqdm(range(amount), desc=operation_name):
-            
-            exec_time = None  # Initialize execution time as None to enter the loop
+            # Iterate the specified number of times ('amount') for the current operation
+            for i in tqdm(range(amount), desc=operation_name):
                 
-            # Loop until a valid execution time is obtained
-            # while exec_time is None:
-            maps = None
-            additional_function = None
-            try:
-                res = generator()  # Generate the raw operation using the provided generator function
+                exec_time = None  # Initialize execution time as None to enter the loop
+                    
+                # Loop until a valid execution time is obtained
+                # while exec_time is None:
+                maps = None
+                additional_function = None
+                try:
+                    res = generator()  # Generate the raw operation using the provided generator function
 
-                if isinstance(res, tuple):
-                    raw_operation, additional_tuple = res
-                    if isinstance(additional_tuple, tuple):
-                        maps, additional_function = additional_tuple
+                    if isinstance(res, tuple):
+                        raw_operation, additional_tuple = res
+                        if isinstance(additional_tuple, tuple):
+                            maps, additional_function = additional_tuple
+                        else:
+                            maps = additional_tuple
                     else:
-                        maps = additional_tuple
+                        raw_operation = res
+                    
+                    # Get operation features
+
+                    print(raw_operation)
+                    
+                    op_features = extract_op_features_from_affine_code(raw_operation,tmp_file,maps,additional_function)
+                    
+                    loops_data = asdict(op_features)  # Convert the dataclass to a dictionary
+                    loops_data.pop("raw_operation")  # Remove raw_operation
+                    
+                    
+                    transform_wrapped_operation = transform_wrapper(raw_operation, maps=maps, additional_function=additional_function)
+                    transform_wrapped_operation = __inline(transform_wrapped_operation, tmp_file)
+
+                    # Evaluate the execution time of the transformed operation with a timeout of 300 seconds
+                    exec_time, assertion = evaluate_code_with_cmd_and_timeout(transform_wrapped_operation, tmp_file, 300)
+
+                    # If the execution time is valid and below a certain threshold, calculate a more stable median execution time
+                    if assertion and exec_time < 1000000:
+                        exec_time = np.median([exec_time] + [evaluate_code_with_cmd_and_timeout(transform_wrapped_operation, tmp_file,300)[0] for _ in range(2)])
+                
+                except Exception as e:
+                    print(f"\033[91;1mError occurred while generating operation: {e}\033[0m")   
+                    continue
+                
+                # If a valid execution time was obtained, store the operation details
+                if exec_time:
+                    # print("write in progress")
+                    
+                    all_operations[f"{raw_operation}"] = {
+                        "operation": raw_operation,  # The raw operation
+                        "transform_wrapped_operation": transform_wrapped_operation,  # The transformed wrapped operation
+                        "loops_data": loops_data,  # Data related to the loops in the operation
+                        "execution_time": exec_time,  # The median execution time
+                    }
                 else:
-                    raw_operation = res
-                
-                # Get operation features
-
-                print(raw_operation)
-                
-                op_features = extract_op_features_from_affine_code(raw_operation,tmp_file,maps,additional_function)
-                
-                loops_data = asdict(op_features)  # Convert the dataclass to a dictionary
-                loops_data.pop("raw_operation")  # Remove raw_operation
-                
-                
-                transform_wrapped_operation = transform_wrapper(raw_operation, maps=maps, additional_function=additional_function)
-                transform_wrapped_operation = __inline(transform_wrapped_operation, tmp_file)
-
-                # Evaluate the execution time of the transformed operation with a timeout of 300 seconds
-                exec_time, assertion = evaluate_code_with_cmd_and_timeout(transform_wrapped_operation, tmp_file, 300)
-
-                # If the execution time is valid and below a certain threshold, calculate a more stable median execution time
-                if assertion and exec_time < 1000000:
-                    exec_time = np.median([exec_time] + [evaluate_code_with_cmd_and_timeout(transform_wrapped_operation, tmp_file,300)[0] for _ in range(2)])
+                    continue  # If no valid execution time, skip to the next iteration
             
-            except Exception as e:
-                print(f"\033[91;1mError occurred while generating operation: {e}\033[0m")   
-                continue
-            
-            # If a valid execution time was obtained, store the operation details
-            if exec_time:
-                # print("write in progress")
-                
-                all_operations[f"{raw_operation}"] = {
-                    "operation": raw_operation,  # The raw operation
-                    "transform_wrapped_operation": transform_wrapped_operation,  # The transformed wrapped operation
-                    "loops_data": loops_data,  # Data related to the loops in the operation
-                    "execution_time": exec_time,  # The median execution time
-                }
-            else:
-                continue  # If no valid execution time, skip to the next iteration
-        
-        # Write all the collected operation data to the output file in JSON format
+            # Write all the collected operation data to the output file in JSON format
+        with open(f"{args.output_file}-{j}", 'w') as file:
+            json.dump(all_operations, file)
+
+    # Merge all the output files into a single JSON file
+    merged_operations = {}
+
+    for j in range(5):
+        with open(f"{args.output_file}-{j}", 'r') as file:
+            operations = json.load(file)
+            merged_operations.update(operations)
+
     with open(args.output_file, 'w') as file:
-        json.dump(all_operations, file)
+        json.dump(merged_operations, file)
+    

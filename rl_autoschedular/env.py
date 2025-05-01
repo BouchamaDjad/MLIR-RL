@@ -6,6 +6,7 @@ from tqdm import tqdm
 import math
 import os
 import string
+import re
 from typing import Optional, Literal
 from rl_autoschedular import config as cfg
 from rl_autoschedular.state import OperationState, BenchmarkFeatures
@@ -16,7 +17,9 @@ from rl_autoschedular.observation import (
     extract_bench_features_from_code,
     extract_function,
     extract_op_features_from_affine_code,
-    build_op_features_vector
+    build_op_features_vector,
+    transform_wrapper_2,
+    transform_wrapper_3
 )
 from rl_autoschedular.transforms import (
     apply_transformation_with_timeout,
@@ -28,6 +31,13 @@ from rl_autoschedular.evaluation import (
     evaluate_code_with_cmd_and_timeout
 )
 from utils.log import print_alert, print_info, print_success, print_error
+
+log_file = "raw_op_lowering_2.log"
+
+# Create the file if it doesn't exist
+if not os.path.exists(log_file):
+    with open(log_file, "w") as f:
+        f.write("")
 
 def get_operation_type(raw_operation):
     operation_type = "unknown"
@@ -47,12 +57,26 @@ def get_operation_type(raw_operation):
 
     return operation_type
 
+def raw_op_code_tree(raw_op: str, full_code: str,tmp_file):
+    # Remove the first match of 'r^%\w+\s+=' from raw_op
+    raw_op = re.sub(r'^%\w+\s+=\s+', '', raw_op, count=1)
+
+    code,n_fill = transform_wrapper_3(raw_op,full_code)
+
+    trees = build_loops_tree_using_lowering(code,tmp_file)
+
+    if trees is None :
+        return []
+    
+    return trees[n_fill:]
+
 def fix(code: str, tmp_file_path) -> str:
     if "myFunction" not in code:
         return code
+    code = code.replace(extract_function(code),"")
 
     # code = code.replace("func.func private @myFunction", "func.func @myFunction")
-    code = __inline(code, tmp_file_path)
+    # code = __inline(code, tmp_file_path)
     return code
 
 class Env:
@@ -119,11 +143,26 @@ class Env:
                 # Get full MLIR code and execution time
                 code = json_data[i][1]["transform_wrapped_operation"]
                 code = fix(code,self.tmp_file)
-                # code = extract_function(code)
+                # code = code.replace(extract_function(code),"")
                 exec_time = json_data[i][1]["execution_time"]
                 # Build benchmark features
                 bench_name = f"bench_{i}"
                 benchmark_data = extract_bench_features_from_code(bench_name, code, exec_time, exec_time)
+
+                for op_tag,op_feature in benchmark_data.operations.items():
+                    op_trees = raw_op_code_tree(
+                        op_feature.raw_operation,
+                        benchmark_data.code,
+                        self.tmp_file
+                    )
+
+                    if op_trees == []:
+                        with open(log_file,"a") as f:
+                            f.write(f"raw_op = {op_feature.raw_operation}\n")
+                            f.write(f"code = {code}\n\n")
+
+                    benchmark_data.operations[op_tag].op_trees = op_trees
+
                 self.benchmarks_data.append((bench_name, benchmark_data))
 
         self.reset_repeat = reset_repeat
@@ -167,7 +206,7 @@ class Env:
         operation_type = get_operation_type(raw_operation)
 
         # Skip unknown operations or those with no loops
-        while operation_index >= 1 and ( operation_type == "unknown" or len(operation_features.nested_loops) == 0):
+        while operation_index >= 1 and ( operation_type == "unknown" or len(operation_features.nested_loops) == 0 or operation_features.op_trees == []):
             print_alert(f"skipping: {raw_operation}")
 
             operation_index = operation_index - 1
@@ -192,14 +231,14 @@ class Env:
         # 3 because we have 3 transformations that require parameters: TP, T, I
         actions = np.zeros((cfg.max_num_loops, 3, cfg.truncate,))
 
-        tree = build_loops_tree_using_lowering(benchmark_data.code, self.tmp_file)
-        print_info(f"{tree=}")
+        # tree = build_loops_tree_using_lowering(benchmark_data.code, self.tmp_file)
+        # print_info(f"{tree=}")
 
         state = OperationState(
             bench_name=bench_name,
             operation_tag=operation_tag,
             operation_index =operation_index,
-            code_trees=tree,
+            code_trees=operation_features.op_trees,
             operation_type=operation_type,
             operation_features=operation_features,
             transformed_code=benchmark_data.code,
@@ -213,7 +252,7 @@ class Env:
             tmp_file=self.tmp_file
         )
 
-        obs = self.get_obs(state)
+        obs = self.get_obs(state,self.benchmarks_data[self.bench_index][1])
         # obs = torch.tensor(obs, dtype=torch.float32)
         # obs = torch.unsqueeze(obs, 0)
 
@@ -276,11 +315,22 @@ class Env:
 
                 operation_features = extract_op_features_from_affine_code(raw_operation, self.tmp_file)
 
+                op_trees = raw_op_code_tree(
+                        operation_features.raw_operation,
+                        transformed_code,
+                        self.tmp_file
+                    )
+
+                if op_trees == []: # Because of failed transform?
+                    with open(log_file,"a") as f:
+                        f.write(f"raw_op = {operation_features.raw_operation}\n")
+                        f.write(f"code = {transformed_code}\n\n")
+
                 state = OperationState(
                     bench_name=state.bench_name,
                     operation_tag=state.operation_tag,
                     operation_index=state.operation_index,
-                    code_trees=state.code_trees,
+                    code_trees=op_trees,
                     operation_type='conv_2d+img2col',  # The operation type changes
                     operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
                     transformed_code=state.transformed_code,
@@ -296,12 +346,45 @@ class Env:
 
             elif transformed_code and transformation == "fusion":
                 
-                new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
+                new_bench_data = extract_bench_features_from_code(bench_name, transformed_code, bench_data.root_exec_time, state.exec_time)
+                
+                for op_tag,op_feature in new_bench_data.operations.items():
+                    op_trees = raw_op_code_tree(
+                        op_feature.raw_operation,
+                        new_bench_data.code,
+                        self.tmp_file
+                    )
+
+                    if op_trees == []:
+                        with open(log_file,"a") as f:
+                            f.write(f"raw_op = {op_feature.raw_operation}\n")
+                            f.write(f"code = {new_bench_data.code}\n\n")
+
+                    new_bench_data.operations[op_tag].op_trees = op_trees
+
                 self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
 
-                new_tree = build_loops_tree_using_lowering(new_bench_data.code, self.tmp_file)
-                state.code_trees = new_tree
-                print_info(f"{new_tree=}")
+                # new_tree = build_loops_tree_using_lowering(new_bench_data.code, self.tmp_file)
+                # state.code_trees = new_tree
+                # print_info(f"{new_tree=}")
+
+                state = OperationState(
+                    bench_name=state.bench_name,
+                    operation_tag=state.operation_tag,
+                    operation_index=state.operation_index,
+                    code_trees=new_bench_data.operations[state.operation_tag].op_trees,
+                    operation_type=state.operation_type,  
+                    operation_features=new_bench_data.operations[state.operation_tag],  # The loops changed because now we are optimization a mamtul instead of a convolution
+                    transformed_code=transformed_code,
+                    actions=state.actions,
+                    actions_mask=state.actions_mask,
+                    step_count=state.step_count,
+                    exec_time=state.exec_time,
+                    root_exec_time=state.root_exec_time,
+                    transformation_history=state.transformation_history + [(transformation, parameters)],
+                    cummulative_reward=state.cummulative_reward,
+                    tmp_file=self.tmp_file
+                )
             
 
         else:  # transformation == 'no_transformation' or 'vectorization'
@@ -398,6 +481,8 @@ class Env:
             # Switch to the Next operation
             if state.operation_index > 0:
 
+                reward = self.finalize_step(transformed_code, state, transformation, parameters, reward)
+
                 speedup_metric = state.root_exec_time / state.exec_time
                 print('-' * 30)
                 print(f"Operation: {state.bench_name} - {state.operation_tag}")
@@ -411,6 +496,21 @@ class Env:
                 # TODO: Check what is happening here
                 # Re-extract operations data from the new code
                 new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
+
+                for op_tag,op_feature in new_bench_data.operations.items():
+                    op_trees = raw_op_code_tree(
+                        op_feature.raw_operation,
+                        new_bench_data.code,
+                        self.tmp_file
+                    )
+
+                    if op_trees == []: # Because of failed transform?
+                        with open(log_file,"a") as f:
+                            f.write(f"raw_op = {op_feature.raw_operation}\n")
+                            f.write(f"code = {new_bench_data.code}\n\n")
+
+                    new_bench_data.operations[op_tag].op_trees = op_trees
+
                 self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
 
                 # Build a new state that points to the next operation
@@ -441,7 +541,7 @@ class Env:
                         bench_name=bench_name,
                         operation_tag=new_op_tag,
                         operation_index=operation_index,
-                        code_trees=state.code_trees,
+                        code_trees=new_bench_data.operations[new_op_tag].op_trees,
                         operation_type=new_operation_type,
                         operation_features=new_op_features,
                         transformed_code=new_bench_data.code,
@@ -474,31 +574,13 @@ class Env:
             )
 
         if done:
-            # Execute and evaluate the code
-            if cfg.use_bindings:
-                new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
-            else:
-                new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
-            # Print infos and update reward
-            if new_exec_time is None:
-                reward -= 20
-                print_error(f"EXECUTION ERROR: {transformation} {parameters} {next_state.transformation_history}")
-                new_exec_time = next_state.exec_time
-            else:
-                if bench_passed:
-                    # We calculate the speedup
-                    reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
-                    next_state.exec_time = new_exec_time
-                else:
-                    reward -= 20
-                    print_error("ASSERTION FAILED")
-                    new_exec_time = next_state.exec_time
+            reward = self.finalize_step(transformed_code, next_state, transformation, parameters, reward)
 
         next_state.cummulative_reward += reward
 
-        next_obs = self.get_obs(next_state)
-        next_obs = torch.tensor(next_obs, dtype=torch.float32)
-        next_obs = torch.unsqueeze(next_obs, 0)
+        next_obs = self.get_obs(next_state,self.benchmarks_data[self.bench_index][1])
+        # next_obs = torch.tensor(next_obs, dtype=torch.float32)
+        # next_obs = torch.unsqueeze(next_obs, 0)
 
         final_state = None
         if done:
@@ -507,6 +589,29 @@ class Env:
             next_state, next_obs = self.reset()
 
         return next_obs, reward, done, next_state, final_state
+
+    def finalize_step(self, transformed_code, next_state, transformation, parameters, reward):
+        # Execute and evaluate the code
+        if cfg.use_bindings:
+            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
+        else:
+            new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
+        # Print infos and update reward
+        if new_exec_time is None:
+            reward -= 20
+            print_error(f"EXECUTION ERROR: {transformation} {parameters} {next_state.transformation_history}")
+            new_exec_time = next_state.exec_time
+        else:
+            if bench_passed:
+                # We calculate the speedup
+                reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
+                next_state.exec_time = new_exec_time
+            else:
+                reward -= 20
+                print_error("ASSERTION FAILED")
+                new_exec_time = next_state.exec_time
+
+        return reward
 
     def get_obs_old(self, state: OperationState):
         """Build the obervation vector for the input state.
@@ -551,7 +656,7 @@ class Env:
 
         return obs
 
-    def get_obs(self, state: OperationState):
+    def get_obs(self, state: OperationState, bench: BenchmarkFeatures):
         """Build the obervation vector for the input state.
 
         Args:
@@ -564,7 +669,7 @@ class Env:
         # op_features_vector = build_op_features_vector(state.operation_features)
 
         # action_history = state.actions.reshape(-1)
-        # action_mask = state.actions_mask
+        action_mask = state.actions_mask
 
         # obs = np.concatenate((
         #     # The input of the policy network:
@@ -575,11 +680,25 @@ class Env:
         #     # The action mask:
         #     action_mask     # 5 + MAX_NUM_LOOPS + MAX_NUM_LOOPS + (MAX_NUM_LOOPS-1) + (MAX_NUM_LOOPS-2) + (MAX_NUM_LOOPS-3)
         # ))
+        # operation_index = state.operation_index
+        # if state.operation_index > len(state.code_trees) - 1:
+        #     # raise ValueError("code trees less than all the operation tags")
+        #     operation_index = state.operation_index
+        #     state.operation_index = len(state.code_trees) - 1
 
-        curr_tree = state.code_trees[state.operation_index]
-        prev_tree = state.code_trees[state.operation_index - 1] if state.operation_index  >= 1 else None
+        curr_tree = state.code_trees
+        if state.operation_index >= 1:
+            prev_tree = bench.operations[bench.operation_tags[state.operation_index - 1]].op_trees
+        else:
+            prev_tree = []
 
-        return curr_tree,prev_tree
+        # state.operation_index = operation_index
+
+
+        if [] in [prev_tree, curr_tree] and state.operation_index != 0:
+            print("Bug Detected")
+
+        return curr_tree,prev_tree,action_mask
 
     # TODO: Make sure of fusion initial mask
     def initialize_action_mask(self, num_loops: int, operation_type: str):
@@ -662,13 +781,16 @@ class Env:
 
         if state.operation_type == "pooling" or state.operation_type == "conv_2d":
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'tiling':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                if state.operation_type == "conv_2d":
+                    actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]    
+                else:
+                    actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
 
         elif state.operation_type == "conv_2d+img2col":
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
 
         elif state.operation_type == "matmul" or state.operation_type == "add":
             if transformation == 'parallelization':
@@ -676,17 +798,22 @@ class Env:
             if transformation == 'tiling':
                 actions_mask[:TP_BEGIN] = [True, False, True, True, True, False, True]
             if transformation == 'interchange':
-                actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, True]
+                if state.operation_type == "add":
+                    actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, True]
+                else:        
+                    actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, False]
 
         elif state.operation_type in ["generic", "func.call"]:
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
             if transformation == 'interchange':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, True, True, True, False, False]
-                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, False]
             if transformation == 'tiling':
-                # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, False, False, True, False, False]
+                # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, False, False, True, False, True]
                 actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
+            if transformation == 'fusion':
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
 
         # TODO: look into the possibilty of removing this else branch
         else:

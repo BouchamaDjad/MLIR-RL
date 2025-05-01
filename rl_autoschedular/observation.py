@@ -12,8 +12,8 @@ from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, Benchm
 
 
 # ================================================ Tree vecteur functions ========================================
-def extract_function(code: str) -> str:
-    if "myFunction" not in code:
+def extract_function(code: str, function_name: str="myFunction") -> str:
+    if function_name not in code:
         return code
 
     lines = code.split("\n")
@@ -23,7 +23,7 @@ def extract_function(code: str) -> str:
     end_index = 0
 
     for i, line in enumerate(lines):
-        if "myFunction" in line and not start:
+        if function_name in line and not start:
             start_index = i
             start = True
             stack = line.count("{") - line.count("}")
@@ -59,7 +59,7 @@ def build_loops_tree(file_path):
                 map_function = map_function.split(' -> ')[1][1:-2]
                 pre_nodes_maps[map_name] = map_function
 
-    print(pre_nodes_maps)
+    # print(pre_nodes_maps)
 
     lines = extract_function(file_content).split("\n")
     trees = parse_affine_loops(lines)
@@ -69,7 +69,7 @@ def build_loops_tree(file_path):
     return trees
 
 def build_loops_tree_using_lowering(content: str, tmp_path: str):  
-    content = __lower_linalg_to_loops(content, tmp_path)
+    content = __lower_linalg_to_loops_2(content, tmp_path)
     
     if not content:
         return None
@@ -124,7 +124,7 @@ def parse_affine_loops(lines) -> list[LoopNode]:
     
 
 def process_tree(node, maps = None):
-    print(maps)
+    # print(maps)
     loop_features = extract_op_features_from_affine_code_tree(node,maps)
     node.vector = build_op_features_vector(loop_features)
     for child in node.children:
@@ -441,7 +441,8 @@ def extract_op_features_from_affine_code(raw_operation: str, tmp_file_path: str,
         op_count=op_count,
         load_data=load_data,
         store_data=store_data,
-        nested_loops=nested_loops
+        nested_loops=nested_loops,
+        op_trees=[] # TODO:
     )
 
 
@@ -699,6 +700,30 @@ def __lower_linalg_to_loops(mlir_code: str, tmp_file_path: str):
     else:
         return None
 
+def __lower_linalg_to_loops_2(mlir_code: str, tmp_file_path: str):
+    """
+    Lower Linalg dialect code to Affine dialect
+
+    Args:
+        mlir_code (str): the MLIR code to be lowered to Affine dialect
+        tmp_file_path (str): the temporary file to write the MLIR code to
+
+    Returns:
+        Optional[str]: the lowered code with affine dialect
+    """
+    # Write the MLIR code to a temporary file
+    with open(tmp_file_path, "w") as file:
+        file.write(mlir_code)
+
+    # Lower the Linalg dialect code to Affine dialect
+    # removed --linalg-fuse-elementwise-ops
+    out = os.popen(f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt --linalg-fold-unit-extent-dims --one-shot-bufferize=bufferize-function-boundaries --finalizing-bufferize --buffer-deallocation-pipeline --convert-linalg-to-affine-loops {tmp_file_path}").read()
+
+    if out != '':
+        return out
+    else:
+        return None
+
 
 def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str, root_execution_time: int, execution_time: int):
     """Extracts benchmark features from the code's AST result and execution time.
@@ -764,7 +789,8 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
             op_count=op_count,
             load_data=load_data,
             store_data=store_data,
-            nested_loops=nested_loops
+            nested_loops=nested_loops,
+            op_trees=[]
         )
 
     return BenchmarkFeatures(
@@ -824,7 +850,7 @@ def transform_wrapper(operation, maps: Optional[str]=None, additional_function: 
 
     unique_dims = sorted(list(unique_dims))
 
-    print(unique_dims)
+    # print(unique_dims)
     
     consts_snippet = ""
     for dim in unique_dims:
@@ -918,6 +944,141 @@ def transform_wrapper(operation, maps: Optional[str]=None, additional_function: 
 
     return code
 
+def transform_wrapper_2(operation:str, full_code:str, additional_function: Optional[str] = None):
+
+    args, shapes = __getArgsShapes(operation, additional_function)
+    
+    # print_info(args,shapes)
+    
+    #############################################################
+    # consts:
+    dims = []
+    unique_dims = set()
+    for shape in shapes:
+        if shape.startswith("tensor"):
+            arg_dims = list(map(int, re.findall(r'\d+', shape[7:-5])))
+            dims.append( arg_dims )
+            unique_dims = unique_dims.union(arg_dims)
+        else: # shape == "f32"
+            dims.append( -1 )
+            unique_dims = unique_dims.union([-1])
+
+    unique_dims = sorted(list(unique_dims))
+
+    # print(unique_dims)
+    
+    consts_snippet = ""
+    for dim in unique_dims:
+        if dim != -1:
+            consts_snippet += f"  %c{dim} = arith.constant {dim} : index\n"
+
+    #############################################################
+    # allocations:
+
+    # allocations_snippet = ""
+
+    # for arg, shape, arg_dims in zip(args, shapes, dims):
+    #     # print(arg, shape, arg_dims)
+    #     if shape.startswith("tensor"):
+    #         n = shape.count("x")
+    #         temp_shape = "tensor<" + "?x"*n + shape[-4:] # f32> or i64> ir i32>
+    #         alloc_params = ", ".join([f"%c{dim}" for dim in arg_dims])
+    #         allocations_snippet += f"  {arg}_temp = bufferization.alloc_tensor({alloc_params}) : {temp_shape}\n"
+    #         allocations_snippet += f"  {arg} = tensor.cast {arg}_temp : {temp_shape} to {shape}\n"
+    #     else:
+    #         # print(arg, shape, arg_dims)
+    #         allocations_snippet += f"  {arg} = arith.constant 1.00000e+00 : f32\n"
+
+    # print(allocations_snippet)
+
+    #############################################################
+    # function call:
+
+    # function_call_snippet = f"  %ret_arg = func.call @func_call({', '.join(args)}) : ({', '.join(shapes)}) -> ({shapes[-1]})"
+
+    
+    idfs = __handling_identifiers(operation, full_code, args)
+
+    # Handling maps
+    maps_identifiers = re.findall(r"#(\w+)[^\w]",operation)
+
+    maps_identifiers = set(maps_identifiers)
+
+    maps = ""
+    if maps_identifiers:
+        lines = full_code.splitlines()
+        for map_id in maps_identifiers:
+            for line in lines:
+                if f"{map_id} = affine_map" in line:
+                    maps += line + '\n'
+                    break
+    
+    #############################################################
+    # All code:
+
+    code = ""
+    if maps is not None:
+        code += f"{maps}\n"
+    code += 'module attributes {torch.debug_module_name = "Net"} {\n'
+    code += "func.func private @nanoTime() -> i64 attributes { llvm.emit_c_interface }\n"
+    code += "func.func private @printFlops(f64)\n"
+    code += "func.func private @printI64(i64)\n"
+    code += "func.func private @printNewline()\n"
+    code += "func.func private @printMemrefF32(tensor<*xf32>)\n"
+    code += f"{additional_function}\n" if additional_function else ""
+    code += "\n"
+    code += "\n"
+    code +=f"func.func @matmul() -> {shapes[-1]}{{\n"
+    code += "\n"
+    code += "%val = arith.constant 2.00000e+00 : f32\n"
+    code += "%zero = arith.constant 0.00000e+00 : f32\n"
+    code += "\n"
+    
+    # code +=f"%out = bufferization.alloc_tensor() : tensor<{N}x{K}xf32>\n"
+    # code +=f"%A = linalg.fill ins(%val : f32) outs(%out : tensor<{N}x{K}xf32>) -> tensor<{N}x{K}xf32>\n"
+    n_fill = 0
+    for arg, shape, arg_dims in zip(args, shapes, dims):
+        # print_info(arg,shape,arg_dims)
+        if shape != 'f32':
+            tmp_arg = f'%tmp_{arg[1:]}'
+            code +=f"{tmp_arg} = bufferization.alloc_tensor() : {shape}\n"
+            code +=f"{arg} = linalg.fill ins(%val : f32) outs({tmp_arg} : {shape}) -> {shape}\n"
+            n_fill += 1
+        else:
+            code +=f"{arg} = arith.constant 2.00000e+00 : f32\n"
+    
+    code += "\n"
+    code += "\n".join(idfs) + "\n" if idfs else ''
+    code += "%t0 = func.call @nanoTime() : () -> (i64)\n"
+    code += "\n"
+    
+    # code +=f"%D = linalg.matmul ins(%A, %B: tensor<{N}x{K}xf32>, tensor<{K}x{M}xf32>) outs(%C: tensor<{N}x{M}xf32>) -> tensor<{N}x{M}xf32>\n"
+    code += f"%return_arg = {operation}"
+    
+    code += "\n"
+    code += "%t = func.call @nanoTime() : () -> (i64)\n"
+    code += "%delta = arith.subi %t, %t0 : i64\n"
+    code += "%fp = arith.uitofp %delta : i64 to f64\n"
+    code += "// func.call @printFlops(%fp) : (f64) -> ()\n"
+    code += "func.call @printI64(%delta) : (i64) -> ()\n"
+    code += "func.call @printNewline() : () -> ()\n"
+    code += "\n"
+    code +=f"return %return_arg : {shapes[-1]} \n"
+    code += "}\n"
+    code += "\n"
+    code += "func.func @main(){\n"
+    code += "    %c1 = arith.constant 1: index\n"
+    code += "    %c0 = arith.constant 0 : index\n"
+    code += "    %n = arith.constant 2: index\n"
+    code += "    scf.for %i = %c0 to %n step %c1 {\n"
+    code +=f"    %outputmain = func.call @matmul() : () -> {shapes[-1]}\n"
+    code += "    }\n"
+    code += "    return\n"
+    code += "}\n"
+    code += "}\n"
+
+    return code,n_fill
+
 def __inline(code: str, tmp_file_path: str):
     # Write the MLIR code to a temporary file
     with open(tmp_file_path, "w") as file:
@@ -930,3 +1091,365 @@ def __inline(code: str, tmp_file_path: str):
         return out
     else:
         return None
+
+def __handling_identifiers(operation: str, full_code: str, args):
+
+    idf_defined_elsewhere = re.findall(r"(%\w+)[^\w](?!\s*=)",operation) # matches %15 but not %14 =
+
+    idf_defined_inside = re.findall(r"(%\w+)[^\w]=",operation)
+
+    idf_identifiers = set(idf_defined_elsewhere) - (set(idf_defined_inside).union(set(args)))
+
+    if not args and "for" in operation:
+        idf_identifiers = [idf for idf in idf_identifiers if "for" not in __getLine(operation, idf)]
+        line = operation.splitlines()[0]
+        idf_identifiers.extend(re.findall(r'outs\s*\(%\w+\s*=\s*(%\w+)\)',line))    
+
+    # print(idf_identifiers)
+
+    idfs = []
+    if idf_identifiers:
+
+        lines = full_code.splitlines()
+        for idf in idf_identifiers:
+
+            for line in lines:
+                if f"{idf} =" in line:                 
+
+                    if line.strip() not in operation:
+                        if "{" in line and line.count("{") != line.count("}"):
+                            word = re.findall(r"([a-zA-Z][^\s]+)",line.strip())[0]
+                            line = extract_function(full_code, word)
+
+                        line_idfs = __handling_identifiers(line, full_code, set())
+                        if line_idfs:
+                            idfs.extend(line_idfs)
+                    
+                    idfs.append(line.strip())
+                    break
+
+        idfs_set = set()
+        final_idfs = []
+        for idf in idfs:
+            if not idf in idfs_set:
+                idfs_set.add(idf)
+                final_idfs.append(idf)
+
+        idfs = final_idfs
+    
+    return idfs
+
+def __getLine(text: str, word: str):
+    for line in text.splitlines():
+        if word in line:
+            return line
+        
+    return ""
+
+def __getArgsShapes(operation, additional_function=None):
+    ins_outs_pattern = "(?:ins|outs)\s*\(([^())]+)\)"
+    fields = re.findall(ins_outs_pattern, operation)
+
+    if fields == [] and additional_function is not None:
+	# # TODO: Add shape extraction so that allocation snippet could be replicated
+        fields = re.findall("(?:\(([^(]+)\))(?:\s*\->\s*([^(]+))", operation)[0]
+        
+        args,shapes = [],[]
+        for f in fields[0].split(","):
+            shapes.append(f.strip())
+        shapes.append(fields[1])
+
+        args = re.findall("(?:@\w+\(([^)]+))",operation)[0].split(',')
+
+        args = [arg.strip() for arg in args]
+        shapes = [shape.strip() for shape in shapes]
+
+    else:
+        args, shapes = [], []
+        for field in fields:
+            args_field, shapes_field = field.split(':')
+            args   += args_field.split(',')
+            shapes += shapes_field.split(',')
+
+        args = [arg.strip() for arg in args]
+        shapes = [shape.strip() for shape in shapes]
+
+        args, shapes = __remove_duplicate_args(args, shapes)
+
+    return args, shapes
+
+def transform_wrapper_3(operation:str, full_code:str, additional_function: Optional[str] = None):
+
+    args, shapes = __getArgsShapes(operation, additional_function)
+
+    idfs, idfs_shapes = __handling_identifiers_3(operation, full_code, args)
+
+    if idfs:
+        args = idfs + args
+        shapes = idfs_shapes + shapes
+        args, shapes = __remove_duplicate_args(args, shapes)
+    
+    # print(args,shapes)
+    
+    #############################################################
+    # consts:
+    dims = []
+    unique_dims = set()
+    for shape in shapes:
+        if shape.startswith("tensor"):
+            arg_dims = list(map(int, re.findall(r'\d+', shape[7:-5])))
+            dims.append( arg_dims )
+            unique_dims = unique_dims.union(arg_dims)
+        else: # shape == "f32"
+            dims.append( -1 )
+            unique_dims = unique_dims.union([-1])
+
+    unique_dims = sorted(list(unique_dims))
+
+    # Handling maps
+    maps_identifiers = re.findall(r"#(\w+)[^\w]",operation)
+
+    maps_identifiers = set(maps_identifiers)
+
+    maps = ""
+    if maps_identifiers:
+        lines = full_code.splitlines()
+        for map_id in maps_identifiers:
+            for line in lines:
+                if f"{map_id} = affine_map" in line:
+                    maps += line + '\n'
+                    break
+    
+    #############################################################
+    # All code:
+
+    code = ""
+    if maps is not None:
+        code += f"{maps}\n"
+    code += 'module attributes {torch.debug_module_name = "Net"} {\n'
+    code += "func.func private @nanoTime() -> i64 attributes { llvm.emit_c_interface }\n"
+    code += "func.func private @printFlops(f64)\n"
+    code += "func.func private @printI64(i64)\n"
+    code += "func.func private @printNewline()\n"
+    code += "func.func private @printMemrefF32(tensor<*xf32>)\n"
+    code += f"{additional_function}\n" if additional_function else ""
+    code += "\n"
+    code += "\n"
+    code +=f"func.func @matmul() -> {shapes[-1]}{{\n"
+    code += "\n"
+    code += "%val = arith.constant 2.00000e+00 : f32\n"
+    code += "%zero = arith.constant 0.00000e+00 : f32\n"
+    code += "\n"
+    
+    # code +=f"%out = bufferization.alloc_tensor() : tensor<{N}x{K}xf32>\n"
+    # code +=f"%A = linalg.fill ins(%val : f32) outs(%out : tensor<{N}x{K}xf32>) -> tensor<{N}x{K}xf32>\n"
+    n_fill = 0
+    for arg, shape, arg_dims in zip(args, shapes, dims):
+        # print_info(arg,shape,arg_dims)
+        if shape not in ['f32','index']:
+            tmp_arg = f'%tmp_{arg[1:]}'
+            code +=f"{tmp_arg} = bufferization.alloc_tensor() : {shape}\n"
+            code +=f"{arg} = linalg.fill ins(%val : f32) outs({tmp_arg} : {shape}) -> {shape}\n"
+            n_fill += 1
+        elif shape == "index":
+            code += f"{arg} = arith.constant 1 : index \n"
+        else:
+            code +=f"{arg} = arith.constant 2.00000e+00 : f32\n"
+    
+    code += "\n"
+    code += "%t0 = func.call @nanoTime() : () -> (i64)\n"
+    code += "\n"
+    
+    # code +=f"%D = linalg.matmul ins(%A, %B: tensor<{N}x{K}xf32>, tensor<{K}x{M}xf32>) outs(%C: tensor<{N}x{M}xf32>) -> tensor<{N}x{M}xf32>\n"
+    code += f"%return_arg = {operation}"
+    
+    code += "\n"
+    code += "%t = func.call @nanoTime() : () -> (i64)\n"
+    code += "%delta = arith.subi %t, %t0 : i64\n"
+    code += "%fp = arith.uitofp %delta : i64 to f64\n"
+    code += "// func.call @printFlops(%fp) : (f64) -> ()\n"
+    code += "func.call @printI64(%delta) : (i64) -> ()\n"
+    code += "func.call @printNewline() : () -> ()\n"
+    code += "\n"
+    code +=f"return %return_arg : {shapes[-1]} \n"
+    code += "}\n"
+    code += "\n"
+    code += "func.func @main(){\n"
+    code += "    %c1 = arith.constant 1: index\n"
+    code += "    %c0 = arith.constant 0 : index\n"
+    code += "    %n = arith.constant 2: index\n"
+    code += "    scf.for %i = %c0 to %n step %c1 {\n"
+    code +=f"    %outputmain = func.call @matmul() : () -> {shapes[-1]}\n"
+    code += "    }\n"
+    code += "    return\n"
+    code += "}\n"
+    code += "}\n"
+
+    return code,n_fill
+
+def __handling_identifiers_2(operation: str, full_code: str, args):
+
+    idf_defined_elsewhere = re.findall(r"(%\w+)[^\w](?!\s*=)",operation) # matches %15 but not %14 =
+
+    idf_defined_inside = re.findall(r"(%\w+)[^\w]=",operation)
+
+    idf_identifiers = set(idf_defined_elsewhere) - (set(idf_defined_inside).union(set(args)))
+
+    if not args and "for" in operation:
+        idf_identifiers = [idf for idf in idf_identifiers if "for" not in __getLine(operation, idf)]
+        line = operation.splitlines()[0]
+        idf_identifiers.extend(re.findall(r'outs\s*\(%\w+\s*=\s*(%\w+)\)',line))    
+
+        # print(idf_identifiers)
+
+    idfs = []
+    shapes = []
+    if idf_identifiers:
+
+        lines = full_code.splitlines()
+        lines = [line.strip() for line in lines]
+        for idf in idf_identifiers:
+            if idf.startswith("%arg"):
+                for i,v in enumerate(lines):
+                    if operation.splitlines()[0].strip() in v:
+                        break
+                
+                found = False
+                for line in lines[i::-1]:
+                    if re.search(fr"scf.forall \([%\w+\s*,]*{idf}",line) is not None:
+                        idfs.append(idf)
+                        shapes.append("index")
+                        found = True
+                        break
+
+                if found:
+                    continue
+
+
+
+            for line in lines:
+                if f"{idf} =" in line:                 
+
+                    # if line.strip() not in operation:
+                    #     if "{" in line and line.count("{") != line.count("}"):
+                    #         # BUG imagine two scf.forall (sol: think about extracting the entire line? | using a curr index to start with)
+                    #         word = re.findall(r"([a-zA-Z][^\s]+)",line.strip())[0]
+                    #         line = extract_function(full_code, word)
+
+                    if "->" in line:
+                        line = line.splitlines()[0]
+                        shape = __extract_shape(line.split("->")[-1])
+                        shapes.append(shape)
+                    elif ":" in line:
+                        line = line.splitlines()[0]
+                        shape = __extract_shape(line.split(":")[-1])
+                        shapes.append(shape)
+
+                    idfs.append(idf)
+                    
+                    break
+
+        idfs_set = set()
+        final_idfs, final_shapes = [],[]
+        for idf,shape in zip(idfs,shapes):
+            if not idf in idfs_set:
+                idfs_set.add(idf)
+                final_idfs.append(idf)
+                final_shapes.append(shape)
+
+        idfs,shapes = final_idfs, final_shapes
+    
+    return idfs, shapes
+
+def __handling_identifiers_3(operation: str, full_code: str, args):
+
+    idf_defined_elsewhere = re.findall(r"(%\w+)[^\w](?!\s*=)",operation) # matches %15 but not %14 =
+
+    idf_defined_inside = re.findall(r"(%\w+)[^\w]=",operation)
+
+    idf_identifiers = set(idf_defined_elsewhere) - (set(idf_defined_inside).union(set(args)))
+
+    if not args and "for" in operation:
+        idf_identifiers = [idf for idf in idf_identifiers if "for" not in __getLine(operation, idf)]
+        line = operation.splitlines()[0]
+        idf_identifiers.extend(re.findall(r'outs\s*\(%\w+\s*=\s*(%\w+)\)',line))    
+
+        # print(idf_identifiers)
+
+    idfs = []
+    shapes = []
+    if idf_identifiers:
+
+        lines = full_code.splitlines()
+        lines = [line.strip() for line in lines]
+        for i,v in enumerate(lines):
+            if operation.splitlines()[0].strip() in v:
+                break
+
+            match = re.search(r"{tag = \"\w+\"}",operation)
+            if match is not None:
+                if match.group(0) in v:
+                    break
+
+
+        linelist = lines[i::-1] if i != len(lines) - 1 else lines
+
+        if i == len(lines) - 1:
+            print("",end="")
+
+        for idf in idf_identifiers:
+            if idf.startswith("%arg"):
+
+                found = False
+                for line in linelist:
+                    if re.search(fr"scf.forall \([%\w+\s*,]*{idf}",line) is not None:
+                        idfs.append(idf)
+                        shapes.append("index")
+                        found = True
+                        break
+
+                if found:
+                    continue
+
+
+
+            for line in linelist:
+                if f"{idf} =" in line:                 
+
+                    # if line.strip() not in operation:
+                    #     if "{" in line and line.count("{") != line.count("}"):
+                    #         # BUG imagine two scf.forall (sol: think about extracting the entire line? | using a curr index to start with)
+                    #         word = re.findall(r"([a-zA-Z][^\s]+)",line.strip())[0]
+                    #         line = extract_function(full_code, word)
+
+                    if "->" in line:
+                        line = line.splitlines()[0]
+                        shape = __extract_shape(line.split("->")[-1])
+                        shapes.append(shape)
+                    elif ":" in line:
+                        line = line.splitlines()[0]
+                        shape = __extract_shape(line.split(":")[-1])
+                        shapes.append(shape)
+
+                    idfs.append(idf)
+                    
+                    break
+
+        idfs_set = set()
+        final_idfs, final_shapes = [],[]
+        for idf,shape in zip(idfs,shapes):
+            if not idf in idfs_set:
+                idfs_set.add(idf)
+                final_idfs.append(idf)
+                final_shapes.append(shape)
+
+        idfs,shapes = final_idfs, final_shapes
+    
+    return idfs, shapes
+
+def __extract_shape(return_part: str) -> str:
+    match = re.search(r"(tensor<(?:[0-9]+x)+f32>)|(f32)", return_part)
+    if match is None:
+        raise ValueError("could not find any shape")
+    else:
+        return match.group(0)

@@ -6,6 +6,8 @@ from typing import Optional
 from rl_autoschedular import config as cfg
 from rl_autoschedular.state import LoopNode
 
+import numpy as np
+
 def initialization_function_xavier(x):
     return nn.init.xavier_uniform_(x)
 
@@ -247,7 +249,11 @@ class HiearchyModel(nn.Module):
         )
         
         self.roots_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            self.comp_embed_layer_sizes[-1], self.input_dim, batch_first=True
+        )
+
+        self.tree_list_lstm = nn.LSTM(
+            embedding_size, embedding_size, batch_first=True
         )
         
         
@@ -278,12 +284,13 @@ class HiearchyModel(nn.Module):
     
     
     def get_hidden_state(self, node):
-        nodes_list = []
-        for n in node.children:
-            # Recusrive call to embed all the children of the loop first if they exist
-            nodes_list.append(self.get_hidden_state(n))
+        if node is not None and node.children != []:
+            nodes_list = []
+
+            for n in node.children:
+                # Recusrive call to embed all the children of the loop first if they exist
+                nodes_list.append(self.get_hidden_state(n))
         
-        if nodes_list != []:
             # Pass the embedding of all the child loops through the nodes LSTM
             nodes_tensor = torch.cat(nodes_list, 1)
             lstm_out, (nodes_h_n, nodes_c_n) = self.nodes_lstm(nodes_tensor)
@@ -294,13 +301,14 @@ class HiearchyModel(nn.Module):
             nodes_h_n = torch.unsqueeze(self.no_nodes_tensor, 0).expand(
                 1, -1, -1
             )
-        if node.vector is not None:
+
+        if node is not None and node.vector is not None:
             # If there are computations contained in this loop, pass them through the computations LSTM
             
             lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
-                torch.unsqueeze(torch.tensor(node.vector,dtype=torch.float32),dim=0)
+                torch.unsqueeze(torch.unsqueeze(torch.tensor(node.vector,dtype=torch.float32),dim=0),dim=0)
             )
-            comps_h_n = comps_h_n.permute(1, 0, 2)
+            # comps_h_n = comps_h_n.permute(1, 0, 2)
         else: # If there are no child computations contained within this level
             # The computations embedding is a random vector (no_comps_tensor) that represents that there are no computations underneath this level
             comps_h_n = torch.unsqueeze(self.no_comps_tensor, 0).expand(
@@ -317,12 +325,26 @@ class HiearchyModel(nn.Module):
         for i in range(len(self.concat_layers)):
             x = self.concat_layers[i](x)
             x = self.concat_dropouts[i](self.ELU(x))
+
         return x
+
+    def get_hidden_state_list(self, tree: list[LoopNode]):
+        if tree == []:
+            return self.get_hidden_state(None)
+        
+        x_0 = self.get_hidden_state(tree[0])
+
+        for node in tree[1:]:
+            x = self.get_hidden_state(node)
+            x_0 = torch.concat([x_0, x],1)
+            _, (x_0, _) = self.tree_list_lstm(x_0)
+
+        return x_0
        
        
        ## TODO : update the sample method to accept the nodes (or the final vector im not sure how exactly this is gonna work)
     
-    def sample(self, obs: tuple[LoopNode, LoopNode], actions: Optional[list[tuple[str, list[int]]]] = None):
+    def sample(self, obs: tuple[list[LoopNode], list[LoopNode]], action_mask:np.array, actions: Optional[list[tuple[str, list[int]]]] = None):
         """Sample an action from the model.
 
         Args:
@@ -338,17 +360,20 @@ class HiearchyModel(nn.Module):
         
         current_tree, previous_tree = obs
         
-        current_obs = self.get_hidden_state(current_tree)
-        previous_obs = self.get_hidden_state(previous_tree)
+        current_obs = self.get_hidden_state_list(current_tree)
+        previous_obs = self.get_hidden_state_list(previous_tree)
+
+
         
         roots_tensor = torch.cat([current_obs,previous_obs], 1)
         
         lstm_out, (roots_h_n, roots_c_n) = self.roots_lstm(roots_tensor)
         roots_h_n = roots_h_n.permute(1, 0, 2)
         
-        x = roots_h_n
+        x = roots_h_n[0]
         
-        *leading_dims, _ = obs.shape
+        # *leading_dims, _ = obs.shape
+        *leading_dims,_ = x.shape
 
         # Spint `obs` into the input `x` and the `action_mask`
         # x = obs[..., :-(self.action_mask_size)]
@@ -366,7 +391,8 @@ class HiearchyModel(nn.Module):
         # I_BEGIN_4C = I_BEGIN_3C + (L - 2)
 
         # TODO: make action_mask an argument
-        action_mask = torch.ones((*leading_dims, self.action_mask_size), dtype=torch.bool, device=x.device)
+        # action_mask = torch.ones((*leading_dims, self.action_mask_size), dtype=torch.bool, device=x.device)
+        action_mask = torch.tensor(np.expand_dims(action_mask, axis=0))
 
         # Define the mask of each transformation
         transform_mask = action_mask[..., :self.num_transformations]
@@ -380,7 +406,7 @@ class HiearchyModel(nn.Module):
         # embedding shape = (num layer, batch, hidden) if batch_first = True
         # _, ( embedding,  _) = self.lstm(input) # output shape = (batch, seq_lenght, hidden) input shape = (batch, seq, input size)
 
-        x1 = self.backbone(x)
+        x1 = self.backbone(x) # x has to be input_dim
         transformation_logits = self.transformation_selection(x1)
         interchange_logits = self.interchange_fc(x1)
         tiling_logits = self.tiling_fc(x1)

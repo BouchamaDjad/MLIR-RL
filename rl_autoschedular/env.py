@@ -218,7 +218,7 @@ class Env:
             operation_type = get_operation_type(raw_operation)
 
         # Action mask:
-        # Transformations: 5 = TP, T, Interchange, Im2col, Vectorization
+        # Transformations: 5 = TP, T, TF, Interchange, Im2col, Vectorization
         # TP: L loops
         # T : L loops
         # Interchange: 3L - 6 (total)
@@ -229,7 +229,7 @@ class Env:
 
         # Action history:
         # 3 because we have 3 transformations that require parameters: TP, T, I
-        actions = np.zeros((cfg.max_num_loops, 3, cfg.truncate,))
+        actions = np.zeros((cfg.max_num_loops, 4, cfg.truncate,))
 
         # tree = build_loops_tree_using_lowering(benchmark_data.code, self.tmp_file)
         # print_info(f"{tree=}")
@@ -545,7 +545,7 @@ class Env:
                         operation_type=new_operation_type,
                         operation_features=new_op_features,
                         transformed_code=new_bench_data.code,
-                        actions=np.zeros((cfg.max_num_loops, 3, cfg.truncate)),
+                        actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
                         actions_mask=actions_mask,
                         step_count=0,
                         exec_time=state.exec_time,
@@ -700,21 +700,21 @@ class Env:
 
         return curr_tree,prev_tree,action_mask
 
-    # TODO: Make sure of fusion initial mask
     def initialize_action_mask(self, num_loops: int, operation_type: str):
         """Initialize the action mask for a specified number of loops and operation type.
 
         Notes:
-            Action mask (NUM_TRANSFORMATIONS + L + L + (L-1) + (L-2) + (L-3) ):
-                Transformations: no_transform, TP, T, Interchange, vect, img2col
+            Action mask (NUM_TRANSFORMATIONS + L + L + L + (L-1) + (L-2) + (L-3) ):
+                Transformations: no_transform, TP, T, Interchange, vect, img2col, TF
                 TP: L loops
                 T : L loops
+                TF: L loops
                 Interchange: 2-consecutive interchanges: L - 1
                         : 3-consecutive interchanges: L - 2
                         : 4-consecutive interchanges: L - 3
                 Interchange: 3L - 6
 
-            action_mask[:NUM_TRANSFORMATIONS] = [no_transform, TP, T, I, vect, img2col]
+            action_mask[:NUM_TRANSFORMATIONS] = [no_transform, TP, T, TF, I, vect, img2col]
 
         Args:
             num_loops (int): The number of loops in the operation.
@@ -727,18 +727,20 @@ class Env:
 
         TP_BEGIN = cfg.num_transformations
         T_BEGIN = TP_BEGIN + L
-        I_BEGIN_2C = T_BEGIN + L
+        TF_BEGIN = T_BEGIN + L
+        I_BEGIN_2C = TF_BEGIN + L
         I_BEGIN_3C = I_BEGIN_2C + (L - 1)
         I_BEGIN_4C = I_BEGIN_3C + (L - 2)
 
-        action_mask = np.ones((TP_BEGIN + L + L + 3 * L - 6), dtype=np.bool_)
+        action_mask = np.ones((TP_BEGIN + L + L + L + 3 * L - 6), dtype=np.bool_)
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
             action_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
-        action_mask[T_BEGIN + num_loops:I_BEGIN_2C] = False
+        action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
+        action_mask[TF_BEGIN + num_loops:I_BEGIN_2C] = False
         action_mask[I_BEGIN_2C + num_loops - 1:I_BEGIN_3C] = False
         action_mask[I_BEGIN_3C + num_loops - 2:I_BEGIN_4C] = False
         action_mask[I_BEGIN_4C + num_loops - 3:] = False
@@ -749,13 +751,12 @@ class Env:
 
         return action_mask
 
-    # TODO: Make sure of fusion mask's update condition
     def update_action_mask(self, state: OperationState, transformation: str, num_loops: int):
         """Update the action mask based on the transformation applied.
 
         Notes:
             actions_mask: (NUM_TRANSFORMATIONS + L + L + (L-1) + (L-2) + (L-3) )
-            action_mask[:NUM_TRANSFORMATIONS] = [end, TP, T, I, Img2Col]
+            action_mask[:NUM_TRANSFORMATIONS] = [end, TP, T, TF, I, Img2Col]
 
         Args:
             state (OperationState): The current state of the environment.
@@ -770,7 +771,8 @@ class Env:
 
         TP_BEGIN = cfg.num_transformations
         T_BEGIN = TP_BEGIN + L
-        I_BEGIN_2C = T_BEGIN + L
+        TF_BEGIN = T_BEGIN + L
+        I_BEGIN_2C = TF_BEGIN + L
         # I_BEGIN_3C = I_BEGIN_2C + (L-1)
         # I_BEGIN_4C = I_BEGIN_3C + (L-2)
 
@@ -781,16 +783,13 @@ class Env:
 
         if state.operation_type == "pooling" or state.operation_type == "conv_2d":
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
             if transformation == 'tiling':
-                if state.operation_type == "conv_2d":
-                    actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]    
-                else:
-                    actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
 
         elif state.operation_type == "conv_2d+img2col":
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
 
         elif state.operation_type == "matmul" or state.operation_type == "add":
             if transformation == 'parallelization':
@@ -798,22 +797,17 @@ class Env:
             if transformation == 'tiling':
                 actions_mask[:TP_BEGIN] = [True, False, True, True, True, False, True]
             if transformation == 'interchange':
-                if state.operation_type == "add":
-                    actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, True]
-                else:        
-                    actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, False]
+                actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, True]
 
         elif state.operation_type in ["generic", "func.call"]:
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
             if transformation == 'interchange':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, True, True, True, False, False]
-                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, False]
-            if transformation == 'tiling':
-                # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, False, False, True, False, True]
                 actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
-            if transformation == 'fusion':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+            if transformation == 'tiling':
+                # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, False, False, True, False, False]
+                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
 
         # TODO: look into the possibilty of removing this else branch
         else:
@@ -836,14 +830,14 @@ class Env:
         Returns:
             np.ndarray: The updated action history.
         """
-        # actions.shape: (L, 3, truncate)
-        # parallelization, tiling, interchange
+        # actions.shape: (L, 4, truncate)
+        # parallelization, tiling, interchange, fusion
 
         num_loops = min(cfg.max_num_loops,len(state.operation_features.nested_loops))
         actions = state.actions
         assert state.step_count < state.actions.shape[2] # comparing to `truncate`
 
-        # actions[l, t, s] = the parameters of transformation `t` for loop `l` at step `s`
+        # actions[l, t, s] = the parameters of transformation `t` for loop `l` at step `s`        
         for loop_index in range(num_loops):
             if transformation == 'parallelization':
                 actions[loop_index, 0, state.step_count] = parameters[loop_index]
@@ -851,9 +845,11 @@ class Env:
                 actions[loop_index, 1, state.step_count] = parameters[loop_index]
             elif transformation == 'interchange':
                 actions[loop_index, 2, state.step_count] = parameters[loop_index]
+            elif transformation == 'fusion':
+                actions[loop_index, 3, state.step_count] = parameters[loop_index]
 
         return actions
-
+    
     def get_interchange_actions(self, num_loops: int):
         """Get all the possible interchanges for `num_loops`
 
@@ -955,7 +951,7 @@ class Env:
         action_name, parameter = raw_action
 
         # Sellect the tiling candidates for each loop
-        if action_name in ['tiling', 'parallelization']:
+        if action_name in ['tiling', 'parallelization', 'fusion']:
             # Get loop upper bounds
             candidates = [
                 [0] + self.get_tiling_candidates(loop.upper_bound, num_candidates=cfg.num_tile_sizes, iterator_type=loop.iterator_type)
@@ -1006,7 +1002,16 @@ class Env:
             return ['vectorization', [0]]
 
         elif action_name == 'fusion':
-            return ['fusion', [0]]
+            fusion_parameters = []
+            for i in range(num_loops):
+                if i < len(parameter):
+                    if parameter[i] != -1:
+                        fusion_parameters.append(candidates[i][parameter[i]])
+                    else:  # parameter[i] == -1:
+                        fusion_parameters.append(0)
+                else:  # i >= len(parameter)
+                    fusion_parameters.append(0)
+            return ['fusion', fusion_parameters]
 
         return ['no_transformation', [0]]
 

@@ -84,11 +84,10 @@ class OperationState:
     """Features of the operation."""
     code_trees: list[LoopNode]
     """The Tree structure of the code at the current state (contains possibly multiple trees)"""
-
     transformed_code: str
     """The operation string with wrapping and transformations."""
     actions: np.ndarray
-    """Action parameters for parallelization, tiling and interchange. The shape is (MAX_NUM_LOOPS, 3, truncate)."""
+    """Action parameters for parallelization, tiling, fusion and interchange. The shape is (MAX_NUM_LOOPS, 4, truncate)."""
     actions_mask: np.ndarray
     """Mask for the actions. The shape is (5 + L + L + (L-1) + (L-2) + (L-3)) where L = MAX_NUM_LOOPS."""
     step_count: int

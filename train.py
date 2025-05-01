@@ -29,17 +29,35 @@ os.environ["CXX"] = f"{os.getenv('SCRATCH')}/gcc/bin/g++"
 
 # print_info("$CXX = ",os.getenv("CXX"))
 
-# Set environments
-env = ParallelEnv(
-    num_env=1,
-    reset_repeat=1,
-    step_repeat=1
-)
-eval_env = ParallelEnv(
-    num_env=1,
-    reset_repeat=1,
-    step_repeat=1
-)
+import pickle
+# Check if environments are already pickled
+env_pickle_path = "env.pkl"
+eval_env_pickle_path = "eval_env.pkl"
+
+if not os.path.exists(env_pickle_path):
+
+    env = ParallelEnv(
+        num_env=1,
+        reset_repeat=1,
+        step_repeat=1
+    )
+
+    with open(env_pickle_path, "wb") as f:
+        pickle.dump(env, f)
+        print_info(f"Environment saved to {env_pickle_path}")
+
+if not os.path.exists(eval_env_pickle_path):
+
+    eval_env = ParallelEnv(
+        num_env=1,
+        reset_repeat=1,
+        step_repeat=1
+    )
+    
+    with open(eval_env_pickle_path, "wb") as f:
+        pickle.dump(eval_env, f)
+        print_info(f"Evaluation environment saved to {eval_env_pickle_path}")
+
 print_info('Env build ...')
 # NOTE: using only one environment
 print_info(f'tmp_file = {env.envs[0].tmp_file}')

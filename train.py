@@ -1,4 +1,5 @@
 # Load environment variables
+import os
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
@@ -21,6 +22,12 @@ from rl_autoschedular.ppo import (
 device = torch.device("cpu")
 
 print_info('Finish imports')
+
+os.environ["PATH"] = f"{os.environ['SCRATCH']}/gcc/bin:{os.environ['SCRATCH']}/lld/bin:{os.environ['PATH']}"
+os.environ["LD_LIBRARY_PATH"] = f"{os.getenv('SCRATCH')}/gcc/lib64:{os.getenv('LD_LIBRARY_PATH')}"
+os.environ["CXX"] = f"{os.getenv('SCRATCH')}/gcc/bin/g++"
+
+# print_info("$CXX = ",os.getenv("CXX"))
 
 # Set environments
 env = ParallelEnv(
@@ -94,5 +101,15 @@ for step in tqdm_range:
 # Stop logs if enabled
 if cfg.logging:
     neptune_logs.stop()
+
+    print('\n','-'*30)
+    with open("neptune.out","w") as f:
+        f.write(str(neptune_logs))
+        print("neptune has been logged")
+    
+    for i in ['train/final_speedup', 'train/cummulative_reward', 'train/policy_loss', 'train/value_loss', 'eval/final_speedup']:
+        print_info(i,':',neptune_logs[i])
+
+    print('\n',"-"*30)
 
 print_info('Training ended ... ')

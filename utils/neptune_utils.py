@@ -1,5 +1,5 @@
 import os
-import neptune
+import utils.neptune_mock as neptune
 from typing import Literal
 
 

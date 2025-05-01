@@ -8,6 +8,8 @@ from rl_autoschedular.state import LoopNode
 
 import numpy as np
 
+from utils.log import print_alert
+
 def initialization_function_xavier(x):
     return nn.init.xavier_uniform_(x)
 
@@ -362,15 +364,13 @@ class HiearchyModel(nn.Module):
         
         current_obs = self.get_hidden_state_list(current_tree)
         previous_obs = self.get_hidden_state_list(previous_tree)
-
-
         
         roots_tensor = torch.cat([current_obs,previous_obs], 1)
         
         lstm_out, (roots_h_n, roots_c_n) = self.roots_lstm(roots_tensor)
         roots_h_n = roots_h_n.permute(1, 0, 2)
         
-        x = roots_h_n[0]
+        x = roots_h_n[0] # TODO: is this okay
         
         # *leading_dims, _ = obs.shape
         *leading_dims,_ = x.shape

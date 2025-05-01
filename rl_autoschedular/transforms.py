@@ -169,23 +169,46 @@ def transform_dialect_interchange(code: str, operation_tag: str, interchange_lis
     return result
 
 
-def transform_dialect_fusion(code: str, operation_tag: str, next_operation_tag: str, tmp_file_path: str):
+def transform_dialect_fusion(code: str, operation_tag: str, next_operation_tag: str, tiling_size: list[int],tmp_file_path: str):
+    """Apply the tiling and fusion transformation to the specified operation in the given code.
+
+    Args:
+        code (str): The code to apply the transformation to.
+        operation_tag (str): The tag of the operation to apply the transformation to.
+        producer_tag (str): the tag of the producer to fuse with
+        tiling_size (list[int]): The tiling size to apply.
+        tmp_file_path (str): The path to the temporary file to write the code to.
+
+    Returns:
+        str: The code after applying the transformation.
+    """    
+
+    if not tiling_size:
+        return ''
+
+    if all([a == 0 for a in tiling_size]):
+        return code # TODO: not too sure ?
     
     code = code.strip()
 
-    transform_dilaect_code = (
+    n_loops = sum([s != 0 for s in tiling_size])
+    r = ', '.join(['!transform.any_op'] * n_loops)
+    assert n_loops > 0, "No loops to tile"
+
+    transform_dialect_code = (
         f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
         f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
-        f'    %op_{next_operation_tag} = transform.structured.match attributes{{tag = "{next_operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
         f'    %op_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-        f'    %forall_op_{operation_tag} = transform.get_parent_op %op_{operation_tag}: (!transform.any_op) -> !transform.any_op\n'
+        f'    %tiled_op_{operation_tag}, %loops:{n_loops} = transform.structured.tile_using_for %op_{operation_tag} tile_sizes {str(tiling_size)} : (!transform.any_op) -> (!transform.any_op, {r})\n'
+        f'    %op_{next_operation_tag} = transform.structured.match attributes{{tag = "{next_operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+        f'    %forall_op_{operation_tag} = transform.get_parent_op %tiled_op_{operation_tag}: (!transform.any_op) -> !transform.any_op\n'
         f'    transform.structured.fuse_into_containing_op %op_{next_operation_tag} into %forall_op_{operation_tag} : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
         f'    transform.yield\n'
         f'  }}\n'
         f'}}\n'
     )
 
-    code = code + transform_dilaect_code + '\n'
+    code = code + transform_dialect_code + '\n'
 
     with open(tmp_file_path, "w") as file:
         file.write(code)
@@ -509,8 +532,12 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
             new_code = transform_dialect_vectorise(code, state.operation_tag, tmp_file)
     
     elif transformation == "fusion":
+        if not parameters:
+            print_alert("REASON: No parameters")
+            return ''
+        
         if state.producer_tag is not None:
-            new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, tmp_file)
+            new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
             
         else:
             new_code = code

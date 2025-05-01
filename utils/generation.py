@@ -1122,7 +1122,7 @@ def softmax(*args,dim=3):
 """
 
     additional_function = (f"""
-    func.func private @softmax(%input: tensor<{SHAPE}>, %output: tensor<{SHAPE}>) -> tensor<{SHAPE}> attributes {{ "func.inline" = unit }} {{
+    func.func private @softmax(%input: tensor<{SHAPE}>, %output: tensor<{SHAPE}>) -> tensor<{SHAPE}> {{
     %zero = arith.constant 0.00000e+00 : f32
     // Allocate temporary tensors for max and sum computations\n"""
     f"""%tmp_max = bufferization.alloc_tensor() : tensor<{Fill_SHAPE}>\n""" 
@@ -1389,9 +1389,9 @@ LINALG_OPERATION_GENERATORS = {
     "pooling_nwc_max": pooling_nwc_max,
     "pooling_nwc_sum": pooling_nwc_sum,
     "relu": relu,
-    "softmax_1d": lambda: softmax(dim=1),
-    "softmax_2d": lambda *args: softmax(*args,dim=2),
-    "softmax_3d": lambda *args: softmax(*args, dim=3),
-    "softmax_4d": lambda *args: softmax(*args, dim=4),
+    # "softmax_1d": lambda: softmax(dim=1),
+    # "softmax_2d": lambda *args: softmax(*args,dim=2),
+    # "softmax_3d": lambda *args: softmax(*args, dim=3),
+    # "softmax_4d": lambda *args: softmax(*args, dim=4),
     "sigmoid": sigmoid
 }

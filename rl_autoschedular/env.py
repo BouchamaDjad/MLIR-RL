@@ -293,8 +293,8 @@ class Env:
                     operation_type='conv_2d+img2col',  # The operation type changes
                     operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
                     current_producer = 0,
-                    producer_tag = producer_tag,
-                    producer_features = producer_features,
+                    producer_tag = state.producer_tag,
+                    producer_features = state.producer_features,
                     transformed_code=state.transformed_code,
                     actions=state.actions,
                     actions_mask=state.actions_mask,
@@ -308,10 +308,10 @@ class Env:
 
             elif transformed_code and transformation == "fusion":
                 
-                if (state.producer_id + 1) < len(state.producer_features.producers):
-                    state.producer_id += 1
-                    state.producer_tag = state.operation_features.producers[state.producer_id]
-                    state.producer_features = benchmark_data.operations[producer_tag]
+                if state.producer_features is not None and (state.current_producer + 1) < len(state.producer_features.producers):
+                    state.current_producer += 1
+                    state.producer_tag = state.producer_features.producers[state.current_producer]
+                    state.producer_features = self.benchmarks_data[self.bench_index][1].operations[state.producer_tag]
                 
                 else:
                     state.producer_tag == None
@@ -436,9 +436,9 @@ class Env:
                 raw_operation = new_op_features.raw_operation
                 new_operation_type = get_operation_type(raw_operation)
                 
-                if len(operation_features.producers) != 0:
-                    producer_tag = operation_features.producers[0]
-                    producer_features = benchmark_data.operations[producer_tag]
+                if len(new_op_features.producers) != 0:
+                    producer_tag = new_op_features.producers[0]
+                    producer_features = self.benchmarks_data[self.bench_index][1].operations[producer_tag]
                     
                 else:
                     producer_tag = None
@@ -522,8 +522,8 @@ class Env:
         next_state.cummulative_reward += reward
 
         next_obs = self.get_obs(next_state)
-        next_obs = torch.tensor(next_obs, dtype=torch.float32)
-        next_obs = torch.unsqueeze(next_obs, 0)
+        # next_obs = torch.tensor(next_obs, dtype=torch.float32)
+        # next_obs = torch.unsqueeze(next_obs, 0)
 
         final_state = None
         if done:
@@ -589,7 +589,7 @@ class Env:
         op_features_vector = build_op_features_vector(state.operation_features)
 
         # action_history = state.actions.reshape(-1)
-        # action_mask = state.actions_mask
+        action_mask = state.actions_mask
 
         # obs = np.concatenate((
         #     # The input of the policy network:
@@ -609,7 +609,7 @@ class Env:
             
             prod_tree = None
 
-        return curr_tree,prod_tree
+        return curr_tree,prod_tree,action_mask
 
     # TODO: Make sure of fusion initial mask
     def initialize_action_mask(self, num_loops: int, operation_type: str):

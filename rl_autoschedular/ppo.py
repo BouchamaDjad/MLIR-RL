@@ -1,11 +1,15 @@
 import torch
 import neptune
+import numpy as np
 from typing import Optional
 from rl_autoschedular.env import ParallelEnv
 from rl_autoschedular.model import HiearchyModel as Model
-from rl_autoschedular.state import OperationState
+from rl_autoschedular.state import LoopNode, OperationState
 from rl_autoschedular import config as cfg
 from dataclasses import dataclass
+
+from utils.log import print_error
+import traceback
 
 
 @dataclass
@@ -21,7 +25,7 @@ class Trajectory:
     """Values of actions in the trajectory with one additional step (shifted to one step in the future)."""
     action_log_p: torch.Tensor
     """Action log probabilities in the trajectory."""
-    x: torch.Tensor
+    x: list[tuple[LoopNode, LoopNode, np.array]]
     """Observation vectors in the trajectory."""
     rewards: torch.Tensor
     """Rewards in the trajectory."""
@@ -43,29 +47,28 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         Trajectory: The collected trajectory.
     """
 
-    batch_state, batch_obs = env.reset(idx=0)
+    batch_state, batch_obs = env.reset()
     # batch_obs = [obs.to(device) for obs in batch_obs]
 
     stored_state: list[OperationState] = []
     stored_action_index: list[tuple[str, list[int]]] = []
     stored_value: list[torch.Tensor] = []
     stored_action_log_p: list[torch.Tensor] = []
-    stored_x: list[torch.Tensor] = []
+    stored_x: list[tuple[LoopNode, LoopNode, np.array]] = []
     stored_reward: list[torch.Tensor] = []
     stored_done: list[torch.Tensor] = []
 
     # for i in tqdm(range(len_trajectory)):
     for i in range(len_trajectory):
-
-        x = batch_obs[0] # bricole
+        *x,action_mask = batch_obs[0] # bricole
         with torch.no_grad():
-            action_index, action_log_p, values, entropy = model.sample(x)
+            action_index, action_log_p, values, entropy = model.sample(x,action_mask)
             # TODO: Look into removing the following code (repetition of model.sample call for no obvious reason )
-            new_action_index, new_action_log_p, new_values, new_entropy = model.sample(x, actions=action_index)
-            assert (action_index == new_action_index), 'check the get_p yerham babak'
-            assert (new_action_log_p == action_log_p).all(), 'check the get_p yerham babak'
-            assert (values == new_values).all(), 'check the get_p yerham babak'
-            assert (entropy == new_entropy).all(), 'check the get_p yerham babak'
+            # new_action_index, new_action_log_p, new_values, new_entropy = model.sample(x, actions=action_index)
+            # assert (action_index == new_action_index), 'check the get_p yerham babak'
+            # assert (new_action_log_p == action_log_p).all(), 'check the get_p yerham babak'
+            # assert (values == new_values).all(), 'check the get_p yerham babak'
+            # assert (entropy == new_entropy).all(), 'check the get_p yerham babak'
 
         batch_next_obs, batch_reward, batch_terminated, batch_next_state, batch_final_state = env.step(batch_state, action_index)
 
@@ -75,7 +78,7 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         stored_state.append(batch_state[0])
         stored_value.append(values)
         stored_action_log_p.append(action_log_p)
-        stored_x.append(x)
+        stored_x.append(batch_obs[0])
         stored_reward.append(torch.tensor(batch_reward).unsqueeze(0))
         stored_done.append(torch.tensor(batch_terminated).unsqueeze(0))
 
@@ -108,12 +111,12 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         batch_obs = batch_next_obs
 
     with torch.no_grad():
-        x = torch.cat(batch_obs)
-        _, _, next_value, _ = model.sample(x)
+        *x,action_mask = batch_obs[0]
+        _, _, next_value, _ = model.sample(x,action_mask)
 
     stored_value_tensor = torch.concatenate(stored_value)
     stored_action_log_p_tensor = torch.concatenate(stored_action_log_p)
-    stored_x_tensor = torch.concatenate(stored_x)
+    # stored_x_tensor = torch.concatenate(stored_x)
     stored_reward_tensor = torch.concatenate(stored_reward).float()
     stored_done_tensor = torch.concatenate(stored_done).float()
 
@@ -126,7 +129,7 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         values=stored_value_tensor.detach(),
         next_values=stored_next_value.detach(),
         action_log_p=stored_action_log_p_tensor.detach(),
-        x=stored_x_tensor.detach(),
+        x=stored_x,#_tensor.detach(),
         rewards=stored_reward_tensor.detach(),
         done=stored_done_tensor.detach(),
     )
@@ -160,7 +163,7 @@ def shuffle_trajectory(trajectory: Trajectory):
     stored_value = stored_value[permutation]
     stored_next_value = stored_next_value[permutation]
     stored_action_log_p = stored_action_log_p[permutation]
-    stored_x = stored_x[permutation]
+    stored_x = [stored_x[i] for i in permutation]
     stored_reward = stored_reward[permutation]
     stored_done = stored_done[permutation]
 
@@ -200,7 +203,7 @@ def shuffle_ppo_data(stored_action_index: list[tuple[str, list[int]]], stored_ac
 
     stored_action_index = [stored_action_index[i] for i in permutation]
     stored_action_log_p = stored_action_log_p[permutation]
-    stored_x = stored_x[permutation]
+    stored_x = [stored_x[i] for i in permutation]
     advantage = advantage[permutation]
     returns = returns[permutation]
 
@@ -275,7 +278,7 @@ def ppo_update(trajectory: Trajectory, model: Model, optimizer: torch.optim.Opti
         stored_reward = trajectory.rewards
         stored_done = trajectory.done
 
-        len_trajectory = stored_x.shape[0]
+        len_trajectory = stored_value.shape[0]
         assert len_trajectory % ppo_batch_size == 0
 
         stored_value = stored_value.reshape(-1).detach()
@@ -305,10 +308,24 @@ def ppo_update(trajectory: Trajectory, model: Model, optimizer: torch.optim.Opti
             action_log_p = stored_action_log_p[begin:end].to(device)
             advantage = stored_advantage[begin:end].to(device)
             returns = stored_returns[begin:end].to(device)
-            x = stored_x[begin:end].to(device)
+            x = stored_x[begin:end]# .to(device)
 
             # New predicition:
-            new_action_index, new_action_log_p, new_values, entropy = model.sample(x, actions=action_index)
+            
+            new_action_log_p, new_values, entropy = [], [], []
+            for single_x,single_action_index in zip(x,action_index):
+                *obs, action_mask = single_x
+                
+                _, n_action_log_p, value, ent = model.sample(obs, action_mask, actions=[single_action_index])
+                
+                new_action_log_p.append(n_action_log_p)
+                new_values.append(value)
+                entropy.append(ent.unsqueeze(dim=0))
+
+            
+            new_action_log_p = torch.cat(new_action_log_p, dim=0)
+            new_values = torch.cat(new_values, dim=0)
+            entropy = torch.cat(entropy, dim=0).mean()
 
             # print(advantage.round(decimals=2))
 
@@ -332,6 +349,9 @@ def ppo_update(trajectory: Trajectory, model: Model, optimizer: torch.optim.Opti
             loss.backward()
             clip_factor = torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             optimizer.step()
+
+            if torch.isnan(loss).all():
+                raise ValueError(f"loss became Nan")
 
             acc_loss += loss.item()
             loss_i += 1
@@ -370,13 +390,14 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
 
         # Reset the environement with the specific operation
         state, obs = env.reset(i)
-        obs = torch.cat(obs).to(device)
+        # obs = torch.cat(obs).to(device)
 
         while True:
+            *obs, action_mask = obs[0]
 
             with torch.no_grad():
                 # Select the action using the model
-                action, _, _, _ = model.sample(obs)
+                action, _, _, _ = model.sample(obs, action_mask)
 
             # Apply the action and get the next state
             next_obs, reward, terminated, next_state, final_state = env.step(state, action)
@@ -398,7 +419,8 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
                 break
 
             state = next_state
-            obs = torch.cat(next_obs).to(device)
+            obs = next_obs
+            # obs = torch.cat(next_obs).to(device)
 
         print('\n\n\n')
 

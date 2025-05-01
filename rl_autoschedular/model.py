@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -213,7 +214,7 @@ class HiearchyModel(nn.Module):
         self.num_transformations = cfg.num_transformations
         self.num_tiles = cfg.num_tile_sizes
         
-        embedding_size = self.comp_embed_layer_sizes[-1]
+        embedding_size = self.input_dim# self.comp_embed_layer_sizes[-1]
         
         concat_layer_sizes = [
             embedding_size * 2  # i changed it to *2 only because we dont have the loop_tensor_vector
@@ -278,14 +279,13 @@ class HiearchyModel(nn.Module):
     
     
     def get_hidden_state(self, node):
-        nodes_list = []
-        print(node)
+        if node is not None and node.children != []:
+            nodes_list = []
+
+            for n in node.children:
+                # Recusrive call to embed all the children of the loop first if they exist
+                nodes_list.append(self.get_hidden_state(n))
         
-        for n in node.children:
-            # Recusrive call to embed all the children of the loop first if they exist
-            nodes_list.append(self.get_hidden_state(n))
-        
-        if nodes_list != []:
             # Pass the embedding of all the child loops through the nodes LSTM
             nodes_tensor = torch.cat(nodes_list, 1)
             lstm_out, (nodes_h_n, nodes_c_n) = self.nodes_lstm(nodes_tensor)
@@ -296,16 +296,14 @@ class HiearchyModel(nn.Module):
             nodes_h_n = torch.unsqueeze(self.no_nodes_tensor, 0).expand(
                 1, -1, -1
             )
-        if node.vector is not None:
+
+        if node is not None and node.vector is not None:
             # If there are computations contained in this loop, pass them through the computations LSTM
-            print(vector.shape)
-            lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
-                torch.tensor(node.vector, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-            )
             
-            print(comps_h_n.shape)
-            print(comps_c_n.shape)
-            comps_h_n = comps_h_n.permute(1, 0, 2)
+            lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
+                torch.unsqueeze(torch.unsqueeze(torch.tensor(node.vector,dtype=torch.float32),dim=0),dim=0)
+            )
+            # comps_h_n = comps_h_n.permute(1, 0, 2)
         else: # If there are no child computations contained within this level
             # The computations embedding is a random vector (no_comps_tensor) that represents that there are no computations underneath this level
             comps_h_n = torch.unsqueeze(self.no_comps_tensor, 0).expand(
@@ -322,12 +320,10 @@ class HiearchyModel(nn.Module):
         for i in range(len(self.concat_layers)):
             x = self.concat_layers[i](x)
             x = self.concat_dropouts[i](self.ELU(x))
+
         return x
-       
-       
-       ## TODO : update the sample method to accept the nodes (or the final vector im not sure how exactly this is gonna work)
-    
-    def sample(self, obs: tuple[LoopNode, LoopNode], actions: Optional[list[tuple[str, list[int]]]] = None):
+
+    def sample(self, obs: tuple[LoopNode, LoopNode], action_mask: np.array, actions: Optional[list[tuple[str, list[int]]]] = None):
         """Sample an action from the model.
 
         Args:
@@ -351,9 +347,9 @@ class HiearchyModel(nn.Module):
         lstm_out, (roots_h_n, roots_c_n) = self.roots_lstm(roots_tensor)
         roots_h_n = roots_h_n.permute(1, 0, 2)
         
-        x = roots_h_n
+        x = roots_h_n[0]
         
-        *leading_dims, _ = obs.shape
+        *leading_dims, _ = x.shape
 
         # Spint `obs` into the input `x` and the `action_mask`
         # x = obs[..., :-(self.action_mask_size)]
@@ -371,7 +367,7 @@ class HiearchyModel(nn.Module):
         # I_BEGIN_4C = I_BEGIN_3C + (L - 2)
 
         # TODO: make action_mask an argument
-        action_mask = torch.ones((*leading_dims, self.action_mask_size), dtype=torch.bool, device=x.device)
+        action_mask = torch.tensor(np.expand_dims(action_mask, axis=0))
 
         # Define the mask of each transformation
         transform_mask = action_mask[..., :self.num_transformations]

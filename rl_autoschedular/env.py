@@ -11,10 +11,8 @@ from rl_autoschedular import config as cfg
 from rl_autoschedular.state import OperationState, BenchmarkFeatures
 from rl_autoschedular.observation import (
     __inline,
-    build_loops_tree_using_lowering,
     extract_bench_features_from_file,
     extract_bench_features_from_code,
-    extract_function,
     extract_op_features_from_affine_code,
     build_op_features_vector,
     build_loop_tree_from_ast
@@ -183,14 +181,15 @@ class Env:
         # Transformations: 5 = TP, T, Interchange, Im2col, Vectorization
         # TP: L loops
         # T : L loops
+        # TF: L loops
         # Interchange: 3L - 6 (total)
         #            : L - 1 for 2-consecutive interchanges
         #            : L - 2 for 3-consecutive interchanges
         #            : L - 3 for 4-consecutive interchanges
         actions_mask = self.initialize_action_mask(num_loops, operation_type)
         
-        with open('full_code_with_tags.mlir', 'w', encoding='utf-8') as file:
-            file.write(benchmark_data.code)
+        # with open('full_code_with_tags.mlir', 'w', encoding='utf-8') as file:
+        #     file.write(benchmark_data.code)
         
         # Action history:
         # 3 because we have 3 transformations that require parameters: TP, T, I
@@ -588,7 +587,7 @@ class Env:
 
         op_features_vector = build_op_features_vector(state.operation_features)
 
-        # action_history = state.actions.reshape(-1)
+        # action_history = state.actions.reshape(-1) # TODO: we have to see how to re-incorporate it
         action_mask = state.actions_mask
 
         # obs = np.concatenate((
@@ -611,21 +610,21 @@ class Env:
 
         return curr_tree,prod_tree,action_mask
 
-    # TODO: Make sure of fusion initial mask
     def initialize_action_mask(self, num_loops: int, operation_type: str):
         """Initialize the action mask for a specified number of loops and operation type.
 
         Notes:
-            Action mask (NUM_TRANSFORMATIONS + L + L + (L-1) + (L-2) + (L-3) ):
-                Transformations: no_transform, TP, T, Interchange, vect, img2col
+            Action mask (NUM_TRANSFORMATIONS + L + L + L + (L-1) + (L-2) + (L-3) ):
+                Transformations: no_transform, TP, T, Interchange, vect, img2col, TF
                 TP: L loops
                 T : L loops
+                TF: L loops
                 Interchange: 2-consecutive interchanges: L - 1
                         : 3-consecutive interchanges: L - 2
                         : 4-consecutive interchanges: L - 3
                 Interchange: 3L - 6
 
-            action_mask[:NUM_TRANSFORMATIONS] = [no_transform, TP, T, I, vect, img2col]
+            action_mask[:NUM_TRANSFORMATIONS] = [no_transform, TP, T, TF, I, vect, img2col]
 
         Args:
             num_loops (int): The number of loops in the operation.
@@ -638,18 +637,20 @@ class Env:
 
         TP_BEGIN = cfg.num_transformations
         T_BEGIN = TP_BEGIN + L
-        I_BEGIN_2C = T_BEGIN + L
+        TF_BEGIN = T_BEGIN + L
+        I_BEGIN_2C = TF_BEGIN + L
         I_BEGIN_3C = I_BEGIN_2C + (L - 1)
         I_BEGIN_4C = I_BEGIN_3C + (L - 2)
 
-        action_mask = np.ones((TP_BEGIN + L + L + 3 * L - 6), dtype=np.bool_)
+        action_mask = np.ones((TP_BEGIN + L + L + L + 3 * L - 6), dtype=np.bool_)
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
             action_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
-        action_mask[T_BEGIN + num_loops:I_BEGIN_2C] = False
+        action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
+        action_mask[TF_BEGIN + num_loops:I_BEGIN_2C] = False
         action_mask[I_BEGIN_2C + num_loops - 1:I_BEGIN_3C] = False
         action_mask[I_BEGIN_3C + num_loops - 2:I_BEGIN_4C] = False
         action_mask[I_BEGIN_4C + num_loops - 3:] = False
@@ -660,13 +661,12 @@ class Env:
 
         return action_mask
 
-    # TODO: Make sure of fusion mask's update condition
     def update_action_mask(self, state: OperationState, transformation: str, num_loops: int):
         """Update the action mask based on the transformation applied.
 
         Notes:
             actions_mask: (NUM_TRANSFORMATIONS + L + L + (L-1) + (L-2) + (L-3) )
-            action_mask[:NUM_TRANSFORMATIONS] = [end, TP, T, I, Img2Col]
+            action_mask[:NUM_TRANSFORMATIONS] = [end, TP, T, TF, I, Img2Col]
 
         Args:
             state (OperationState): The current state of the environment.
@@ -681,7 +681,8 @@ class Env:
 
         TP_BEGIN = cfg.num_transformations
         T_BEGIN = TP_BEGIN + L
-        I_BEGIN_2C = T_BEGIN + L
+        TF_BEGIN = T_BEGIN + L
+        I_BEGIN_2C = TF_BEGIN + L
         # I_BEGIN_3C = I_BEGIN_2C + (L-1)
         # I_BEGIN_4C = I_BEGIN_3C + (L-2)
 
@@ -754,6 +755,8 @@ class Env:
                 actions[loop_index, 1, state.step_count] = parameters[loop_index]
             elif transformation == 'interchange':
                 actions[loop_index, 2, state.step_count] = parameters[loop_index]
+            elif transformation == 'fusion':
+                actions[loop_index, 3, state.step_count] = parameters[loop_index]
 
         return actions
 
@@ -909,6 +912,16 @@ class Env:
             return ['vectorization', [0]]
 
         elif action_name == 'fusion':
+            fusion_parameters = []
+            for i in range(num_loops):
+                if i < len(parameter):
+                    if parameter[i] != -1:
+                        fusion_parameters.append(candidates[i][parameter[i]])
+                    else:  # parameter[i] == -1:
+                        fusion_parameters.append(0)
+                else:  # i >= len(parameter)
+                    fusion_parameters.append(0)
+
             return ['fusion', [0]]
 
         return ['no_transformation', [0]]

@@ -214,7 +214,7 @@ class HiearchyModel(nn.Module):
         self.num_transformations = cfg.num_transformations
         self.num_tiles = cfg.num_tile_sizes
         
-        embedding_size = self.input_dim# self.comp_embed_layer_sizes[-1]
+        embedding_size = self.comp_embed_layer_sizes[-1]
         
         concat_layer_sizes = [
             embedding_size * 2  # i changed it to *2 only because we dont have the loop_tensor_vector
@@ -248,7 +248,7 @@ class HiearchyModel(nn.Module):
         )
         
         self.roots_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            self.comp_embed_layer_sizes[-1], self.input_dim, batch_first=True
         )
         
         
@@ -276,6 +276,7 @@ class HiearchyModel(nn.Module):
         self.interchange_fc = nn.Linear(512, (3 * self.num_loops - 6))
         self.tiling_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no tiling
         self.parall_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no parallelizattion
+        self.fusion_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no fusion
     
     
     def get_hidden_state(self, node):
@@ -362,7 +363,8 @@ class HiearchyModel(nn.Module):
 
         TP_BEGIN = self.num_transformations
         T_BEGIN = TP_BEGIN + L
-        I_BEGIN_2C = T_BEGIN + L
+        TF_BEGIN = T_BEGIN + L
+        I_BEGIN_2C = TF_BEGIN + L
         # I_BEGIN_3C = I_BEGIN_2C + (L - 1)
         # I_BEGIN_4C = I_BEGIN_3C + (L - 2)
 
@@ -372,7 +374,8 @@ class HiearchyModel(nn.Module):
         # Define the mask of each transformation
         transform_mask = action_mask[..., :self.num_transformations]
         TP_mask = action_mask[..., TP_BEGIN:T_BEGIN]
-        T_mask = action_mask[..., T_BEGIN:I_BEGIN_2C]
+        TF_mask = action_mask[..., T_BEGIN:TF_BEGIN]
+        T_mask = action_mask[..., TF_BEGIN:I_BEGIN_2C]
         I_mask = action_mask[..., I_BEGIN_2C:]
 
         # Model inference:
@@ -386,11 +389,13 @@ class HiearchyModel(nn.Module):
         interchange_logits = self.interchange_fc(x1)
         tiling_logits = self.tiling_fc(x1)
         parall_logits = self.parall_fc(x1)
+        fusion_logits = self.fusion_fc(x1)
 
         values = self.value_network(x)
 
         tiling_logits = tiling_logits.reshape(*leading_dims, self.num_loops, self.num_tiles + 1)
         parall_logits = parall_logits.reshape(*leading_dims, self.num_loops, self.num_tiles + 1)
+        fusion_logits = fusion_logits.reshape(*leading_dims, self.num_loops, self.num_tiles + 1)
 
         # print(parall_logits.shape, tiling_logits.shape, interchange_logits.shape)
 
@@ -403,17 +408,20 @@ class HiearchyModel(nn.Module):
         interchange_dist = Categorical(logits=interchange_logits)
         tiling_dist = Categorical(logits=tiling_logits)
         parall_dist = Categorical(logits=parall_logits)
+        fusion_dist = Categorical(logits=fusion_logits)
 
         if actions is None:
             transformation_index = transformation_dist.sample()
             interchange_index = interchange_dist.sample()
             tiling_index = tiling_dist.sample()
             parall_index = parall_dist.sample()
+            fusion_index = fusion_dist.sample()
 
         else:
 
             transformation_index = torch.zeros((len(actions),), dtype=torch.int64)
             parall_index = torch.zeros((len(actions), L), dtype=torch.int64)
+            fusion_index = torch.zeros((len(actions), L), dtype=torch.int64)
             tiling_index = torch.zeros((len(actions), L), dtype=torch.int64)
             interchange_index = torch.zeros((len(actions),), dtype=torch.int64)
 
@@ -435,6 +443,7 @@ class HiearchyModel(nn.Module):
                 elif action_name == 'img2col':
                     transformation_index[i] = 5
                 elif action_name == "fusion":
+                    fusion_index[i] = torch.tensor(list(parameters) + [0] * (L - len(parameters)))
                     transformation_index[i] = 6
 
 
@@ -443,9 +452,11 @@ class HiearchyModel(nn.Module):
         interchange_log_p = F.log_softmax(interchange_logits, dim=-1).gather(-1, interchange_index.unsqueeze(-1)).reshape(*leading_dims, -1)
         tiling_log_p = F.log_softmax(tiling_logits, dim=-1).gather(-1, tiling_index.unsqueeze(-1)).reshape(*leading_dims, -1)
         parall_log_p = F.log_softmax(parall_logits, dim=-1).gather(-1, parall_index.unsqueeze(-1)).reshape(*leading_dims, -1)
+        fusion_log_p = F.log_softmax(fusion_logits, dim=-1).gather(-1, fusion_index.unsqueeze(-1)).reshape(*leading_dims, -1)
 
         tiling_log_p = torch.where(T_mask, tiling_log_p, 0).sum(-1, keepdim=True)
         parall_log_p = torch.where(TP_mask, parall_log_p, 0).sum(-1, keepdim=True)
+        fusion_log_p = torch.where(TF_mask, fusion_log_p, 0).sum(-1, keepdim=True)
 
         actions = []
         for i in range(transformation_index.shape[0]):
@@ -476,22 +487,28 @@ class HiearchyModel(nn.Module):
                 actions.append(['img2col', None])
 
             elif transformation_index[i] == 6:
-                actions.append(['fusion', None])
+                params = []
+                for j in range(fusion_index[i].shape[0]):
+                    if TF_mask[i, j]:
+                        params.append(fusion_index[i, j].item())
+                actions.append(['fusion', params])
 
-        transformation_log_p, interchange_log_p, tiling_log_p, parall_log_p = transformation_log_p.reshape(-1), interchange_log_p.reshape(-1), tiling_log_p.reshape(-1), parall_log_p.reshape(-1)
+        transformation_log_p, interchange_log_p, tiling_log_p, parall_log_p, fusion_log_p = transformation_log_p.reshape(-1), interchange_log_p.reshape(-1), tiling_log_p.reshape(-1), parall_log_p.reshape(-1), fusion_log_p.reshape(-1)
 
         is_no_action = (transformation_index == 0)
         is_parall = (transformation_index == 1)
         is_tiling = (transformation_index == 2)
         is_interchange = (transformation_index == 3)
+        is_fusion = (transformation_index == 6)
 
         action_log_p = torch.zeros_like(transformation_index, dtype=torch.float32)
         action_log_p[is_interchange] = interchange_log_p[is_interchange] + transformation_log_p[is_interchange]
         action_log_p[is_tiling] = tiling_log_p[is_tiling] + transformation_log_p[is_tiling]
         action_log_p[is_parall] = parall_log_p[is_parall] + transformation_log_p[is_parall]
+        action_log_p[is_fusion] = fusion_log_p[is_fusion] + transformation_log_p[is_fusion]
         action_log_p[is_no_action] = transformation_log_p[is_no_action]
 
-        entropy = transformation_dist.entropy().mean() + interchange_dist.entropy().mean() + tiling_dist.entropy().mean() + parall_dist.entropy().mean()
+        entropy = transformation_dist.entropy().mean() + interchange_dist.entropy().mean() + tiling_dist.entropy().mean() + parall_dist.entropy().mean() + fusion_dist.entropy().mean()
 
         return actions, action_log_p, values, entropy
         # return action_log_p, entropy, values, sub_entropies

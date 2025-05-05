@@ -199,7 +199,7 @@ def transform_dialect_fusion(code: str, operation_tag: str, next_operation_tag: 
         f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
         f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
         f'    %op_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-        f'    %tiled_op_{operation_tag}, %loops:{n_loops} = transform.structured.tile_using_for %op_{operation_tag} tile_sizes {str(tiling_size)} : (!transform.any_op) -> (!transform.any_op, {r})\n'
+        f'    %tiled_op_{operation_tag}, %loops = transform.structured.tile_using_forall %op_{operation_tag} tile_sizes {str(tiling_size)} : (!transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
         f'    %op_{next_operation_tag} = transform.structured.match attributes{{tag = "{next_operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
         f'    %forall_op_{operation_tag} = transform.get_parent_op %tiled_op_{operation_tag}: (!transform.any_op) -> !transform.any_op\n'
         f'    transform.structured.fuse_into_containing_op %op_{next_operation_tag} into %forall_op_{operation_tag} : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
@@ -538,6 +538,9 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
         
         if state.producer_tag is not None:
             new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
+
+            if new_code == code and any([x!=0 for x in parameters]):
+                print("",end="")
             
         else:
             new_code = code

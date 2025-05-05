@@ -193,7 +193,7 @@ class Env:
         
         # Action history:
         # 3 because we have 3 transformations that require parameters: TP, T, I
-        actions = np.zeros((cfg.max_num_loops, 3, cfg.truncate,))
+        actions = np.zeros((cfg.max_num_loops, 4, cfg.truncate,))
 
         if len(operation_features.producers) != 0:
             producer_tag = operation_features.producers[0]
@@ -376,11 +376,13 @@ class Env:
         if trans_failed:
             # We keep the same code as previously
             # We get a penalty of -5
+            if transformation == 'fusion':
+                print("",end="")
             print_error(f'FAILED TRANSFORM: {transformation} {parameters} {state.transformation_history}')
             transformed_code = state.transformed_code
             reward -= 5        
         
-        if transformation not in ['no_transformation', 'vectorization'] and state.step_count < cfg.truncate and \
+        if transformation not in ['no_transformation', 'vectorization' , 'fusion'] and state.step_count < cfg.truncate and \
             not state.operation_type == "unknown":
 
             # Update state actions:
@@ -469,7 +471,7 @@ class Env:
                         producer_tag = producer_tag,
                         producer_features = producer_features,
                         transformed_code=new_bench_data.code,
-                        actions=np.zeros((cfg.max_num_loops, 3, cfg.truncate)),
+                        actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
                         actions_mask=actions_mask,
                         step_count=0,
                         exec_time=state.exec_time,
@@ -646,7 +648,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
+            action_mask[:TP_BEGIN] = [False, True, False, False, False, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -693,17 +695,17 @@ class Env:
 
         if state.operation_type == "pooling" or state.operation_type == "conv_2d":
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'tiling':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
 
         elif state.operation_type == "conv_2d+img2col":
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
 
         elif state.operation_type == "matmul" or state.operation_type == "add":
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'tiling':
                 actions_mask[:TP_BEGIN] = [True, False, True, True, True, False, True]
             if transformation == 'interchange':
@@ -711,7 +713,7 @@ class Env:
 
         elif state.operation_type in ["generic", "func.call"]:
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'interchange':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, True, True, True, False, False]
                 actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
@@ -861,7 +863,7 @@ class Env:
         action_name, parameter = raw_action
 
         # Sellect the tiling candidates for each loop
-        if action_name in ['tiling', 'parallelization']:
+        if action_name in ['tiling', 'parallelization', 'fusion']:
             # Get loop upper bounds
             candidates = [
                 [0] + self.get_tiling_candidates(loop.upper_bound, num_candidates=cfg.num_tile_sizes, iterator_type=loop.iterator_type)
@@ -922,7 +924,7 @@ class Env:
                 else:  # i >= len(parameter)
                     fusion_parameters.append(0)
 
-            return ['fusion', [0]]
+            return ['fusion', fusion_parameters]
 
         return ['no_transformation', [0]]
 

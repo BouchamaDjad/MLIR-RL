@@ -33,7 +33,7 @@ def get_operation_type(raw_operation):
     
     if 'linalg.matmul' in raw_operation:
         operation_type = 'matmul'
-    elif 'linalg.conv' in raw_operation and "3d" not in raw_operation:
+    elif 'linalg.conv' in raw_operation and "3d" not in raw_operation and "conv_2d_ngchw_fgchw" not in raw_operation:
         operation_type = 'conv_2d'
     elif 'pooling' in raw_operation:
         operation_type = 'pooling'
@@ -306,6 +306,8 @@ class Env:
                 )
 
             elif transformed_code and transformation == "fusion":
+
+                # TODO: Look into rebuilding the operation features
                 
                 if state.producer_features is not None and (state.current_producer + 1) < len(state.producer_features.producers):
                     state.current_producer += 1
@@ -376,13 +378,13 @@ class Env:
         if trans_failed:
             # We keep the same code as previously
             # We get a penalty of -5
-            if transformation == 'fusion':
+            if transformation in ['fusion', 'parallelization', 'img2col']:
                 print("",end="")
             print_error(f'FAILED TRANSFORM: {transformation} {parameters} {state.transformation_history}')
             transformed_code = state.transformed_code
             reward -= 5        
         
-        if transformation not in ['no_transformation', 'vectorization' , 'fusion'] and state.step_count < cfg.truncate and \
+        if transformation not in ['no_transformation', 'vectorization'] and state.step_count < cfg.truncate and \
             not state.operation_type == "unknown":
 
             # Update state actions:
@@ -459,7 +461,7 @@ class Env:
 
                 if new_operation_type != "unknown" and len(new_op_features.nested_loops) != 0:                               
 
-                    actions_mask = self.initialize_action_mask(len(new_op_features.nested_loops), state.operation_type)
+                    actions_mask = self.initialize_action_mask(len(new_op_features.nested_loops), new_operation_type)
                     
                     next_state = OperationState(
                         bench_name=bench_name,
@@ -690,12 +692,17 @@ class Env:
 
         actions_mask = state.actions_mask
 
+        # TODO: interchange and tiling are never allowed
         if transformation == 'img2col':
             actions_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
 
         if state.operation_type == "pooling" or state.operation_type == "conv_2d":
             if transformation == 'parallelization':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
+                if state.operation_type == "pooling":
+                    actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
+                else:
+                    actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+
             if transformation == 'tiling':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
 

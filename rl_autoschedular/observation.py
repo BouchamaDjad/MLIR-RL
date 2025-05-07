@@ -13,8 +13,8 @@ from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, Benchm
 
 
 # ================================================ Tree vecteur functions ========================================
-def extract_function(code: str) -> str:
-    if "myFunction" not in code:
+def extract_function(code: str, name:str = "myFunction") -> str:
+    if name not in code:
         return code
 
     lines = code.split("\n")
@@ -24,7 +24,7 @@ def extract_function(code: str) -> str:
     end_index = 0
 
     for i, line in enumerate(lines):
-        if "myFunction" in line and not start:
+        if name in line and not start:
             start_index = i
             start = True
             stack = line.count("{") - line.count("}")
@@ -34,7 +34,7 @@ def extract_function(code: str) -> str:
                 end_index = i
                 break
 
-    return "\n".join(lines[start_index:end_index + 1])
+    return "\n".join(lines[start_index:end_index + 1]),(start_index,end_index + 1)
             
 def build_loops_tree(file_path):
     

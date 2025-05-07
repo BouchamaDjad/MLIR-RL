@@ -13,6 +13,7 @@ from rl_autoschedular.observation import (
     __inline,
     extract_bench_features_from_file,
     extract_bench_features_from_code,
+    extract_function,
     extract_op_features_from_affine_code,
     build_op_features_vector,
     build_loop_tree_from_ast
@@ -46,12 +47,40 @@ def get_operation_type(raw_operation):
 
     return operation_type
 
+import re
+
 def fix(code: str, tmp_file_path) -> str:
-    if "myFunction" not in code:
-        return code
+    # if "myFunction" not in code:
+    #     return code
 
     # code = code.replace("func.func private @myFunction", "func.func @myFunction")
-    code = __inline(code, tmp_file_path)
+    
+    # main,_ = extract_function(code, "main")
+    
+    # code = __inline(code, tmp_file_path)
+
+    _, (start, _) = extract_function(code, "main")
+
+    # "\n".join((code.splitlines()[:start] + main.splitlines()))
+
+    for line in code.splitlines():
+        if 'func.func @matmul' in line:
+            find = re.search(r"(tensor<\d+x[\d+x]*f32>)",line)
+            if find is not None:
+                shape = find.group(0)
+            break
+
+    code = '\n'.join(code.splitlines()[:start] + """func.func @main(){
+    %c1 = arith.constant 1: index
+    %c0 = arith.constant 0 : index
+    %n = arith.constant 2: index
+    scf.for %i = %c0 to %n step %c1 {
+    %outputmain = func.call @matmul() : () -> SHAPE
+    }
+    return
+}
+}""".replace('SHAPE',shape).splitlines())
+
     return code
 
 class Env:
@@ -731,6 +760,9 @@ class Env:
         # TODO: look into the possibilty of removing this else branch
         else:
             raise ValueError("operation_type must be in [pooling, conv_2d, conv_2d+img2col, matmul, add, generic, func.call]")
+        
+        # if transformation == "fusion":
+        #         actions_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
 
         if num_loops == 1:
             actions_mask[3] = False

@@ -226,6 +226,37 @@ def transform_dialect_fusion(code: str, operation_tag: str, next_operation_tag: 
 
     return result
 
+def transform_dialect_fuse_only(code, consumer_tag, producer_tag, tmp_file):
+    code = code.strip()
+
+    transform_dilaect_code = (
+        f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
+        f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
+        f'    %op_{producer_tag} = transform.structured.match attributes{{tag = "{producer_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+        f'    %op_{consumer_tag} = transform.structured.match attributes{{tag = "{consumer_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+        f'    %forall_op_{consumer_tag} = transform.get_parent_op %op_{consumer_tag}: (!transform.any_op) -> !transform.any_op\n'
+        f'    transform.structured.fuse_into_containing_op %op_{producer_tag} into %forall_op_{consumer_tag} : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
+        f'    transform.yield\n'
+        f'  }}\n'
+        f'}}\n'
+    )
+
+    code = code + transform_dilaect_code + '\n'
+
+    with open(tmp_file, "w") as file:
+        file.write(code)
+
+    result = os.popen(
+        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+    ).read()
+
+    result = result.replace("module {\n", "", 1)
+    result = ''.join(result.rsplit('\n}\n', 1))
+    result = re.sub(r"module attributes \{transform.with_named_sequence\} \{\s+\}", "", result)
+
+    return result
+
+
 
 def transform_dialect_vectorise_img2col(code: str, operation_tag: str, tmp_file_path: str):
     """Apply the vectorization transformation with img2col to the specified operation in the given code.
@@ -540,8 +571,10 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
             return ''
         
         if state.producer_tag is not None:
-            new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
-
+            if state.operation_tag not in state.fused_ops:
+                new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
+            else:
+                new_code = transform_dialect_fuse_only(code,state.operation_tag, state.producer_tag, tmp_file)
             if new_code == code and any([x!=0 for x in parameters]):
                 print("",end="")
             

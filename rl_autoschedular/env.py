@@ -240,6 +240,7 @@ class Env:
             current_producer = 0,
             producer_tag = producer_tag,
             producer_features = producer_features,
+            fused_ops = set(),
             transformed_code=benchmark_data.code,
             actions=actions,
             actions_mask=actions_mask,
@@ -323,6 +324,7 @@ class Env:
                     current_producer = 0,
                     producer_tag = state.producer_tag,
                     producer_features = state.producer_features,
+                    fused_ops = state.fused_ops,
                     transformed_code=state.transformed_code,
                     actions=state.actions,
                     actions_mask=state.actions_mask,
@@ -342,7 +344,8 @@ class Env:
                     state.current_producer += 1
                     state.producer_tag = state.producer_features.producers[state.current_producer]
                     state.producer_features = self.benchmarks_data[self.bench_index][1].operations[state.producer_tag]
-                
+                    state.fused_ops.update([state.operation_tag, state.producer_tag])
+                    
                 else:
                     state.producer_tag == None
             
@@ -431,6 +434,7 @@ class Env:
                 current_producer = state.current_producer,
                 producer_tag = state.producer_tag,
                 producer_features = state.producer_features,
+                fused_ops = state.fused_ops,
                 transformed_code=transformed_code,  # New transformed code
                 actions=next_state_actions,  # New actions
                 actions_mask=new_actions_mask,  # New action mask
@@ -501,6 +505,7 @@ class Env:
                         current_producer = 0,
                         producer_tag = producer_tag,
                         producer_features = producer_features,
+                        fused_ops = state.fused_ops,
                         transformed_code=new_bench_data.code,
                         actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
                         actions_mask=actions_mask,

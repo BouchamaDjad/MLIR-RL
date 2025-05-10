@@ -20,12 +20,14 @@ class HiearchyModel_old(nn.Module):
         L = cfg.max_num_loops
         D = cfg.max_num_load_store_dim
         SD = cfg.max_num_stores_loads
-        self.input_dim = (1 + L + L * D * SD + L * D + 5) * 2 + L * 3 * cfg.truncate
+        print(1 + L + L * D * SD + L * D + 5)
+        self.input_dim = 1 + (L + L * D * SD + L * D + 5 + 7) * 2 + L * 4 * cfg.truncate
+        print('input dim:',self.input_dim)
         self.num_loops = L
         self.num_transformations = cfg.num_transformations
         self.num_tiles = cfg.num_tile_sizes
 
-        self.action_mask_size = self.num_transformations + self.num_loops + self.num_loops + 3 * self.num_loops - 6
+        self.action_mask_size = self.num_transformations + self.num_loops + self.num_loops + self.num_loops + 3 * self.num_loops - 6
 
         self.backbone = nn.Sequential(
             nn.Linear(self.input_dim, 512),
@@ -72,21 +74,23 @@ class HiearchyModel_old(nn.Module):
         x = obs[..., :-(self.action_mask_size)]
         action_mask = obs[..., -(self.action_mask_size):].bool()
 
-        # print(action_mask)
+        print(action_mask.shape)
 
         # decompose action mask:
         L = self.num_loops
 
         TP_BEGIN = self.num_transformations
         T_BEGIN = TP_BEGIN + L
-        I_BEGIN_2C = T_BEGIN + L
+        TF_BEGIN = T_BEGIN + L
+        I_BEGIN_2C = TF_BEGIN + L
         # I_BEGIN_3C = I_BEGIN_2C + (L - 1)
         # I_BEGIN_4C = I_BEGIN_3C + (L - 2)
 
         # Define the mask of each transformation
         transform_mask = action_mask[..., :self.num_transformations]
         TP_mask = action_mask[..., TP_BEGIN:T_BEGIN]
-        T_mask = action_mask[..., T_BEGIN:I_BEGIN_2C]
+        T_mask = action_mask[..., T_BEGIN:TF_BEGIN]
+        TF_mask = action_mask[..., TF_BEGIN:I_BEGIN_2C]
         I_mask = action_mask[..., I_BEGIN_2C:]
 
         # Model inference:
@@ -106,11 +110,15 @@ class HiearchyModel_old(nn.Module):
         # print(parall_logits.shape, tiling_logits.shape, interchange_logits.shape)
 
         # Apply the mask on the transformations:
+        print('transformation_logits:', transformation_logits)
+        
+        print('transform_mask:', transform_mask)
         transformation_logits = torch.where(transform_mask, transformation_logits, -float('inf'))
         interchange_logits = torch.where(I_mask, interchange_logits, -float('inf'))
 
         # Get the actions indices:
         transformation_dist = Categorical(logits=transformation_logits)
+        print('transformation_dist:', transformation_dist)
         interchange_dist = Categorical(logits=interchange_logits)
         tiling_dist = Categorical(logits=tiling_logits)
         parall_dist = Categorical(logits=parall_logits)
@@ -163,6 +171,7 @@ class HiearchyModel_old(nn.Module):
         parall_log_p = torch.where(TP_mask, parall_log_p, 0).sum(-1, keepdim=True)
 
         actions = []
+        print('transformation index:',transformation_index)
         for i in range(transformation_index.shape[0]):
             if transformation_index[i] == 0:
                 actions.append(['no_transformation', None])

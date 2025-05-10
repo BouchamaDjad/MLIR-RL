@@ -625,6 +625,13 @@ class Env:
         obs[1:cfg.max_num_loops + 1] = obs[1:cfg.max_num_loops + 1] / 100
         prod_begin = len(op_features_vector) + 1
         obs[prod_begin: prod_begin + cfg.max_num_loops ] = obs[prod_begin: prod_begin + cfg.max_num_loops] / 100
+        
+        print_info('op_features size:',op_features_vector.shape)
+        print_info('prod feature size:',prod_features_vector.shape)
+        print_info('action feature size:',action_history.shape)
+        print_info('mask:',action_mask.shape)
+        
+        print_info('observation size:',obs.shape)
         return obs
 
     def get_obs(self, state: OperationState):

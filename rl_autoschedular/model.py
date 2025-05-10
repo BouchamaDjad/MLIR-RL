@@ -169,6 +169,7 @@ class HiearchyModel_old(nn.Module):
         
         tiling_log_p = torch.where(T_mask, tiling_log_p, 0).sum(-1, keepdim=True)
         parall_log_p = torch.where(TP_mask, parall_log_p, 0).sum(-1, keepdim=True)
+        fusion_log_p = torch.where(TF_mask, fusion_log_p, 0).sum(-1, keepdim=True)
 
         actions = []
         print('transformation index:',transformation_index)
@@ -206,7 +207,7 @@ class HiearchyModel_old(nn.Module):
                         params.append(fusion_index[i, j].item())
                 actions.append(['fusion',params])
 
-        transformation_log_p, interchange_log_p, tiling_log_p, parall_log_p = transformation_log_p.reshape(-1), interchange_log_p.reshape(-1), tiling_log_p.reshape(-1), parall_log_p.reshape(-1),fusion_log_p.reshape(-1) 
+        transformation_log_p, interchange_log_p, tiling_log_p, parall_log_p, fusion_log_p = transformation_log_p.reshape(-1), interchange_log_p.reshape(-1), tiling_log_p.reshape(-1), parall_log_p.reshape(-1), fusion_log_p.reshape(-1)
 
         is_no_action = (transformation_index == 0)
         is_parall = (transformation_index == 1)

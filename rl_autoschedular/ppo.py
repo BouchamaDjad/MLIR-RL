@@ -56,8 +56,8 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
 
     # for i in tqdm(range(len_trajectory)):
     for i in range(len_trajectory):
-        print('batch obs:',batch_obs)
-        x = torch.tensor(batch_obs[0], dtype=torch.float32)
+        x = batch_obs[0]
+        
         with torch.no_grad():
             action_index, action_log_p, values, entropy = model.sample(x)
             new_action_index, new_action_log_p, new_values, new_entropy = model.sample(x, actions=action_index)
@@ -71,7 +71,7 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         stored_action_index += action_index
 
         # NOTE: Only using one environment
-        stored_state.append(batch_state[0], dtype=torch.float32)
+        stored_state.append(x)
         stored_value.append(values)
         stored_action_log_p.append(action_log_p)
         stored_x.append(x)

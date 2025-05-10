@@ -257,8 +257,8 @@ class Env:
         )
 
         obs = self.get_obs_old(state)
-        # obs = torch.tensor(obs, dtype=torch.float32)
-        # obs = torch.unsqueeze(obs, 0)
+        obs = torch.tensor(obs, dtype=torch.float32)
+        obs = torch.unsqueeze(obs, 0)
 
         return state, obs
 
@@ -566,8 +566,8 @@ class Env:
         next_state.cummulative_reward += reward
 
         next_obs = self.get_obs_old(next_state)
-        # next_obs = torch.tensor(next_obs, dtype=torch.float32)
-        # next_obs = torch.unsqueeze(next_obs, 0)
+        next_obs = torch.tensor(next_obs, dtype=torch.float32)
+        next_obs = torch.unsqueeze(next_obs, 0)
 
         final_state = None
         if done:
@@ -607,6 +607,8 @@ class Env:
             operation_type_int = 3
         elif state.operation_type == 'generic':
             operation_type_int = 4
+        else:
+            operation_type_int = 5
 
         operation_type_int_arr = np.array([operation_type_int])
 

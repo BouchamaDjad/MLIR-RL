@@ -5,6 +5,7 @@ load_dotenv(override=True)
 # Import modules
 from rl_autoschedular.env import ParallelEnv
 from rl_autoschedular.model import HiearchyModel as Model
+from rl_autoschedular.model import HiearchyModel_old as old_Model
 import torch
 from tqdm import tqdm
 from rl_autoschedular import config as cfg
@@ -42,7 +43,7 @@ print_info('Configuration:')
 print_info(cfg)
 
 # Set model
-model = Model()
+model = old_Model()
 print_info('input_dim:', model.input_dim)
 
 optimizer = torch.optim.Adam(
@@ -77,7 +78,7 @@ for step in tqdm_range:
         neptune_logs=neptune_logs
     )
 
-    torch.save(model.state_dict(), 'models/ppo_model.pt')
+    torch.save(model.state_dict(), 'models/ppo_model_tree.pt')
 
     if step % 5 == 0:
         evaluate_benchmark(
@@ -88,7 +89,7 @@ for step in tqdm_range:
         )
 
         if cfg.logging:
-            neptune_logs["params"].upload_files(['models/ppo_model.pt'])
+            neptune_logs["params"].upload_files(['models/ppo_model_tree.pt'])
 
 
 # Stop logs if enabled

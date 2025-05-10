@@ -228,9 +228,13 @@ class Env:
             producer_tag = operation_features.producers[0]
             producer_features = benchmark_data.operations[producer_tag]
         else:
+            TP_BEGIN = cfg.num_transformations
+            actions_mask[TP_BEGIN - 1] = False # set fusion to false
             producer_tag = None
             producer_features = None
-            
+        with open('./current_bench.mlir', 'w') as file:
+            file.write(benchmark_data.code)
+
         state = OperationState(
             bench_name=bench_name,
             operation_tag=operation_tag,
@@ -252,7 +256,7 @@ class Env:
             tmp_file=self.tmp_file
         )
 
-        obs = self.get_obs(state)
+        obs = self.get_obs_old(state)
         # obs = torch.tensor(obs, dtype=torch.float32)
         # obs = torch.unsqueeze(obs, 0)
 
@@ -278,6 +282,7 @@ class Env:
 
         # preprocess the action coming from the policy network and make it more explicit
         # aka get the transformation and its parameters (equal to None if no parameters are needded)
+        print_info('processig:', raw_action)
         transformation, parameters = self.process_action(
             raw_action=raw_action,
             state=state
@@ -347,6 +352,8 @@ class Env:
                     state.fused_ops.update([state.operation_tag, state.producer_tag])
                     
                 else:
+                    TP_BEGIN = cfg.num_transformations
+                    state.actions_mask[TP_BEGIN - 1] = False # set fusion to false
                     state.producer_tag == None
             
 
@@ -461,12 +468,12 @@ class Env:
 
                 # TODO: Check what is happening here
                 # Re-extract operations data from the new code
-                new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
-                self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
+                # new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
+                # self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
 
                 # Build a new state that points to the next operation
-                new_op_tag = new_bench_data.operation_tags[state.operation_index - 1]
-                new_op_features = new_bench_data.operations[new_op_tag]
+                new_op_tag = bench_data.operation_tags[state.operation_index - 1]
+                new_op_features = bench_data.operations[new_op_tag]
                 
                 operation_index = state.operation_index - 1
                 raw_operation = new_op_features.raw_operation
@@ -486,8 +493,8 @@ class Env:
                     print_alert(f"skipping: {raw_operation}")
 
                     operation_index = operation_index - 1
-                    new_op_tag = new_bench_data.operation_tags[operation_index]
-                    new_op_features = new_bench_data.operations[new_op_tag]
+                    new_op_tag = bench_data.operation_tags[operation_index]
+                    new_op_features = bench_data.operations[new_op_tag]
 
                     raw_operation = new_op_features.raw_operation
                     new_operation_type = get_operation_type(raw_operation)
@@ -506,7 +513,7 @@ class Env:
                         producer_tag = producer_tag,
                         producer_features = producer_features,
                         fused_ops = state.fused_ops,
-                        transformed_code=new_bench_data.code,
+                        transformed_code=state.transformed_code,
                         actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
                         actions_mask=actions_mask,
                         step_count=0,
@@ -558,7 +565,7 @@ class Env:
 
         next_state.cummulative_reward += reward
 
-        next_obs = self.get_obs(next_state)
+        next_obs = self.get_obs_old(next_state)
         # next_obs = torch.tensor(next_obs, dtype=torch.float32)
         # next_obs = torch.unsqueeze(next_obs, 0)
 
@@ -581,6 +588,11 @@ class Env:
         """
 
         op_features_vector = build_op_features_vector(state.operation_features)
+        
+        if state.producer_features is not None:
+            prod_features_vector = build_op_features_vector(state.producer_features)
+        else:
+            prod_features_vector = np.zeros_like(op_features_vector)
 
         action_history = state.actions.reshape(-1)
         action_mask = state.actions_mask
@@ -602,6 +614,7 @@ class Env:
             # The input of the policy network:
             operation_type_int_arr,  # 1
             op_features_vector,      # MAX_NUM_LOOPS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM*MAX_NUM_STORES_LOADS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM + 5
+            prod_features_vector,
             action_history,  # MAX_NUM_LOOPS*3*CONFIG["truncate"]
 
             # The action mask:
@@ -610,7 +623,8 @@ class Env:
 
         # Normalize the upper bounds of the loops
         obs[1:cfg.max_num_loops + 1] = obs[1:cfg.max_num_loops + 1] / 100
-
+        prod_begin = len(op_features_vector) + 1
+        obs[prod_begin: prod_begin + cfg.max_num_loops ] = obs[prod_begin: prod_begin + cfg.max_num_loops] / 100
         return obs
 
     def get_obs(self, state: OperationState):
@@ -625,7 +639,8 @@ class Env:
 
         op_features_vector = build_op_features_vector(state.operation_features)
 
-        # action_history = state.actions.reshape(-1) # TODO: we have to see how to re-incorporate it
+        action_history = state.actions.reshape(-1) # TODO: we have to see how to re-incorporate it
+        
         action_mask = state.actions_mask
 
         # obs = np.concatenate((
@@ -646,7 +661,7 @@ class Env:
             
             prod_tree = None
 
-        return curr_tree,prod_tree,action_mask
+        return curr_tree,prod_tree,action_mask,action_history
 
     def initialize_action_mask(self, num_loops: int, operation_type: str):
         """Initialize the action mask for a specified number of loops and operation type.
@@ -662,7 +677,7 @@ class Env:
                         : 4-consecutive interchanges: L - 3
                 Interchange: 3L - 6
 
-            action_mask[:NUM_TRANSFORMATIONS] = [no_transform, TP, T, TF, I, vect, img2col]
+            action_mask[:NUM_TRANSFORMATIONS] = [no_transform, TP, T, I, vect, img2col,TF]
 
         Args:
             num_loops (int): The number of loops in the operation.
@@ -684,7 +699,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [False, True, False, False, False, False, True]
+            action_mask[:TP_BEGIN] = [False, True, True, True, False, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -704,7 +719,7 @@ class Env:
 
         Notes:
             actions_mask: (NUM_TRANSFORMATIONS + L + L + (L-1) + (L-2) + (L-3) )
-            action_mask[:NUM_TRANSFORMATIONS] = [end, TP, T, TF, I, Img2Col]
+            action_mask[:NUM_TRANSFORMATIONS] = [end, TP, T, I,vect, Img2Col, TF]
 
         Args:
             state (OperationState): The current state of the environment.
@@ -738,7 +753,7 @@ class Env:
                     actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
 
             if transformation == 'tiling':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
 
         elif state.operation_type == "conv_2d+img2col":
             if transformation == 'parallelization':
@@ -748,7 +763,7 @@ class Env:
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'tiling':
-                actions_mask[:TP_BEGIN] = [True, False, True, True, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, True, True, True, False, False]
             if transformation == 'interchange':
                 actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, True]
 
@@ -760,7 +775,7 @@ class Env:
                 actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
             if transformation == 'tiling':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, False, False, True, False, False]
-                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, False]
 
         # TODO: look into the possibilty of removing this else branch
         else:
@@ -860,6 +875,7 @@ class Env:
         """
 
         # If upperbound equal 1, we only have candidates of 1
+        print_info('tiling num candidates:',n)
         if n == 1:
             return [1] * num_candidates
 
@@ -903,7 +919,8 @@ class Env:
         """
 
         op_features = state.operation_features
-        num_loops = len(op_features.nested_loops)
+        num_loops = min(cfg.max_num_loops,len(op_features.nested_loops))
+        print_info(' number of loops in process:',num_loops)
         action_name, parameter = raw_action
 
         # Sellect the tiling candidates for each loop
@@ -913,6 +930,7 @@ class Env:
                 [0] + self.get_tiling_candidates(loop.upper_bound, num_candidates=cfg.num_tile_sizes, iterator_type=loop.iterator_type)
                 for loop in op_features.nested_loops
             ]
+            
 
         if action_name == 'interchange':
             candidates = self.get_interchange_actions(num_loops)
@@ -943,6 +961,7 @@ class Env:
 
         elif action_name == 'parallelization':
             parall_parameters = []
+            print_info('candidates:',candidates)
             for i in range(num_loops):
                 if i < len(parameter):
                     if parameter[i] != -1:

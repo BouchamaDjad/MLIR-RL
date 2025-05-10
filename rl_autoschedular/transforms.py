@@ -570,7 +570,7 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
             print_alert("REASON: No parameters")
             return ''
         
-        if state.producer_tag is not None:
+        if state.producer_tag is not None and state.producer_tag not in state.fused_ops:
             if state.operation_tag not in state.fused_ops:
                 new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
             else:

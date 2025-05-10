@@ -785,6 +785,9 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
             if not nested_loop_str:
                 continue
             arg, low, high, step, iter = nested_loop_str.strip().split(" ")
+            if int(high) < 0:
+                with open('./upperbound.mlir', 'w') as file:
+                    file.write(raw_ast_info)
             nested_loops.append(NestedLoopFeatures(
                 arg=f'%{arg}',
                 lower_bound=int(low),

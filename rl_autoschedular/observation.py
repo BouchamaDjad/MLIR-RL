@@ -515,7 +515,8 @@ def extract_bench_features_from_code(bench_name: str, code: str, root_execution_
         stderr=subprocess.PIPE
     )
     raw_ast_info = result.stdout.decode('utf-8')
-
+    with open('ast.txt', 'w', encoding='utf-8') as file:
+        file.write(raw_ast_info)
     return __extract_bench_features_from_ast_result(bench_name, raw_ast_info, root_execution_time, execution_time)
 
 

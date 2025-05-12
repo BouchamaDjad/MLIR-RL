@@ -78,7 +78,7 @@ for step in tqdm_range:
         neptune_logs=neptune_logs
     )
 
-    torch.save(model.state_dict(), 'models/ppo_model_tree.pt')
+    torch.save(model.state_dict(), 'models/ppo_model.pt')
 
     if step % 5 == 0:
         evaluate_benchmark(

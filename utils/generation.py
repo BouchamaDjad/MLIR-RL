@@ -1170,8 +1170,8 @@ def randomSubGraph(verbose=False):
     total_maps = ""
     total_additional_function = ""
 
-    iterations = list(range(5))
-    iterations_end = 5
+    iterations = list(range(2))
+    iterations_end = 2
     for _ in iterations:        
         
         operation_name = choice(list(LINALG_OPERATION_GENERATORS.keys())) # TODO: Restriction on operators
@@ -1189,7 +1189,7 @@ def randomSubGraph(verbose=False):
             except:
                 if verbose:
                     print(f"\033[33mskipped\033[0m")
-                if iterations_end > 10:
+                if iterations_end > 5:
                     break
                 
                 iterations.append(iterations_end+1)
@@ -1219,7 +1219,7 @@ def randomSubGraph(verbose=False):
         # Handling maps with the same name from different generators
         maps_identifiers = re.findall(r"#(\w+)[^\w]",maps)
         for map_id in maps_identifiers:
-            new_map = f"map{''.join([choice(string.digits) for _ in range(5)])}"
+            new_map = f"map{''.join([choice(string.digits) for _ in range(2)])}"
             
             
             maps = re.sub(rf'\b{map_id}\b', new_map, maps)
@@ -1229,7 +1229,7 @@ def randomSubGraph(verbose=False):
         # Handling additional functions with the same name (same generator called twice or user negligence)
         functions_identifiers = re.findall(r"@(\w+)[^\w]", additional_function)
         for func_id in functions_identifiers:
-            new_func = f"{func_id}{''.join([choice(string.digits) for _ in range(5)])}"
+            new_func = f"{func_id}{''.join([choice(string.digits) for _ in range(2)])}"
             
             additional_function = re.sub(rf"\b{func_id}\b",new_func, additional_function)
             raw_operation = re.sub(rf"\b{func_id}\b",new_func,raw_operation)    
@@ -1265,7 +1265,7 @@ def randomSubGraph(verbose=False):
                 args_shape.pop(0)
 
             else:
-                new_arg = f"{arg}{''.join([choice(string.digits) for _ in range(5)])}"
+                new_arg = f"{arg}{''.join([choice(string.digits) for _ in range(2)])}"
                 new_args.append(new_arg)
 
             raw_operation = raw_operation.replace(arg,new_arg)
@@ -1282,7 +1282,7 @@ def randomSubGraph(verbose=False):
                 else:
                     core += f"{arg} = arith.constant 1.00000e+00 : f32\n"
 
-        return_var = f"%var{''.join([choice(string.digits) for _ in range(5)])}" # TODO: prod-cons links
+        return_var = f"%var{''.join([choice(string.digits) for _ in range(2)])}" # TODO: prod-cons links
         return_vars.append(return_var)
         
         return_shape = args_shape[-1]
@@ -1389,9 +1389,9 @@ LINALG_OPERATION_GENERATORS = {
     "pooling_nwc_max": pooling_nwc_max,
     "pooling_nwc_sum": pooling_nwc_sum,
     "relu": relu,
-    "softmax_1d": lambda: softmax(dim=1),
-    "softmax_2d": lambda *args: softmax(*args,dim=2),
-    "softmax_3d": lambda *args: softmax(*args, dim=3),
-    "softmax_4d": lambda *args: softmax(*args, dim=4),
-    "sigmoid": sigmoid
+    # "softmax_1d": lambda: softmax(dim=1),
+    # "softmax_2d": lambda *args: softmax(*args,dim=2),
+    # "softmax_3d": lambda *args: softmax(*args, dim=3),
+    # "softmax_4d": lambda *args: softmax(*args, dim=4),
+    # "sigmoid": sigmoid
 }

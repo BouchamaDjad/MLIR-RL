@@ -146,7 +146,7 @@ class Env:
             for i in tqdm(range(len(json_data))):
                 # Get full MLIR code and execution time
                 code = json_data[i][1]["transform_wrapped_operation"]
-                code = fix(code,self.tmp_file)
+                # code = fix(code,self.tmp_file)
                 # code = extract_function(code)
                 exec_time = json_data[i][1]["execution_time"]
                 # Build benchmark features
@@ -456,16 +456,6 @@ class Env:
             # Switch to the Next operation
             if state.operation_index > 0:
 
-                speedup_metric = state.root_exec_time / state.exec_time
-                print('-' * 30)
-                print(f"Operation: {state.bench_name} - {state.operation_tag}")
-                print(state.transformation_history)
-                print('Relative speedup:', speedup_metric)
-                print('Old Exec time:', state.root_exec_time * 10**-9, 's')
-                print('New Exec time:', state.exec_time * 10**-9, 's')
-                print(f"reward: {reward}")
-                print(f"cummulative reward: {state.cummulative_reward + reward}")
-
                 # TODO: Check what is happening here
                 # Re-extract operations data from the new code
                 # new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
@@ -503,6 +493,37 @@ class Env:
 
                     actions_mask = self.initialize_action_mask(len(new_op_features.nested_loops), new_operation_type)
                     
+                     # Execute and evaluate the code
+                    if cfg.use_bindings:
+                        new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
+                    else:
+                        new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
+                    # Print infos and update reward
+                    if new_exec_time is None:
+                        reward -= 20
+                        print_error(f"EXECUTION ERROR: {transformation} {parameters} {state.transformation_history}")
+                        new_exec_time = state.exec_time
+                    else:
+                        if bench_passed:
+                            # We calculate the speedup
+                            reward += self.speedup_reward(new_exec_time, state.root_exec_time)
+
+                        else:
+                            reward -= 20
+                            print_error("ASSERTION FAILED")
+                            new_exec_time = state.exec_time
+                    
+                    speedup_metric = state.exec_time / new_exec_time
+                    print('-' * 30)
+                    print(f"Operation: {state.bench_name} - {state.operation_tag}")
+                    print(state.transformation_history)
+                    print('Relative speedup:', speedup_metric)
+                    print('root Exec time:', state.root_exec_time * 10**-9, 's')
+                    print('Old Exec time:', state.exec_time * 10**-9, 's')
+                    print('New Exec time:', new_exec_time * 10**-9, 's')
+                    print(f"reward: {reward}")
+                    print(f"cummulative reward: {state.cummulative_reward + reward}")
+                    
                     next_state = OperationState(
                         bench_name=bench_name,
                         operation_tag=new_op_tag,
@@ -517,7 +538,7 @@ class Env:
                         actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
                         actions_mask=actions_mask,
                         step_count=0,
-                        exec_time=state.exec_time,
+                        exec_time=new_exec_time,
                         root_exec_time=state.root_exec_time,
                         transformation_history=[],
                         cummulative_reward=state.cummulative_reward,
@@ -593,6 +614,10 @@ class Env:
             prod_features_vector = build_op_features_vector(state.producer_features)
         else:
             prod_features_vector = np.zeros_like(op_features_vector)
+            
+        prod_feature_vector = prod_features_vector[:cfg.max_num_loops]
+        
+        prod_feature_vector = prod_feature_vector / 100
 
         action_history = state.actions.reshape(-1)
         action_mask = state.actions_mask
@@ -611,12 +636,17 @@ class Env:
             operation_type_int = 5
 
         operation_type_int_arr = np.array([operation_type_int])
+        
+        is_consumer = np.array([1, 0])
+        is_producer = np.array([0, 1])
 
         obs = np.concatenate((
             # The input of the policy network:
+            is_consumer,
             operation_type_int_arr,  # 1
             op_features_vector,      # MAX_NUM_LOOPS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM*MAX_NUM_STORES_LOADS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM + 5
-            prod_features_vector,
+            is_producer,
+            prod_feature_vector,
             action_history,  # MAX_NUM_LOOPS*3*CONFIG["truncate"]
 
             # The action mask:
@@ -629,7 +659,7 @@ class Env:
         obs[prod_begin: prod_begin + cfg.max_num_loops ] = obs[prod_begin: prod_begin + cfg.max_num_loops] / 100
         
         print_info('op_features size:',op_features_vector.shape)
-        print_info('prod feature size:',prod_features_vector.shape)
+        print_info('prod feature size:',prod_feature_vector.shape)
         print_info('action feature size:',action_history.shape)
         print_info('mask:',action_mask.shape)
         
@@ -708,7 +738,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [False, True, True, True, False, False, True]
+            action_mask[:TP_BEGIN] = [False, True, True, False, False, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -759,39 +789,44 @@ class Env:
                 if state.operation_type == "pooling":
                     actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
                 else:
-                    actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                    actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
 
             if transformation == 'tiling':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
+            if transformation == "fusion":
+                actions_mask[:TP_BEGIN] = [False, False, False, False, True, False, False]
 
         elif state.operation_type == "conv_2d+img2col":
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
+            if transformation == "fusion":
+                actions_mask[:TP_BEGIN] = [False, False, False, False, True, False, False]
 
         elif state.operation_type == "matmul" or state.operation_type == "add":
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'tiling':
-                actions_mask[:TP_BEGIN] = [True, False, True, True, True, False, False]
+                actions_mask[:TP_BEGIN] = [True, False, True, False, False, False, False]
             if transformation == 'interchange':
                 actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, True]
+            if transformation == "fusion":
+                actions_mask[:TP_BEGIN] = [False, False, False, False, True, False, False]
 
         elif state.operation_type in ["generic", "func.call"]:
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'interchange':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, True, True, True, False, False]
-                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, False]
             if transformation == 'tiling':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, False, False, True, False, False]
-                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, False]
+                actions_mask[:TP_BEGIN] = [True, True, True, False, False, False, False]
+            if transformation == "fusion":
+                actions_mask[:TP_BEGIN] = [False, False, False, False, True, False, False]
 
         # TODO: look into the possibilty of removing this else branch
         else:
             raise ValueError("operation_type must be in [pooling, conv_2d, conv_2d+img2col, matmul, add, generic, func.call]")
-        
-        # if transformation == "fusion":
-        #         actions_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
 
         if num_loops == 1:
             actions_mask[3] = False
@@ -929,7 +964,6 @@ class Env:
 
         op_features = state.operation_features
         num_loops = min(cfg.max_num_loops,len(op_features.nested_loops))
-        print_info(' number of loops in process:',num_loops)
         action_name, parameter = raw_action
 
         # Sellect the tiling candidates for each loop
@@ -970,7 +1004,6 @@ class Env:
 
         elif action_name == 'parallelization':
             parall_parameters = []
-            print_info('candidates:',candidates)
             for i in range(num_loops):
                 if i < len(parameter):
                     if parameter[i] != -1:

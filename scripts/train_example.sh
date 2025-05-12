@@ -3,7 +3,6 @@
 # Define the resource requirements here using #SBATCH
 
 #SBATCH -p compute
-#SBATCH --qos=c2
 #SBATCH --exclusive
 #SBATCH --nodes=1
 #SBATCH -c 28

@@ -9,7 +9,8 @@ from rl_autoschedular.observation import (
     extract_op_features_from_affine_code,
     transform_wrapper,
     get_ast,
-    get_raw_ast_info
+    get_raw_ast_info,
+    extract_bench_features_from_code
 )
 from rl_autoschedular.evaluation import evaluate_code_with_cmd_and_timeout
 from random import randint, choice, shuffle, random
@@ -136,22 +137,19 @@ if __name__ == '__main__':
 
     # print(data[key]['transform_wrapped_operation'])    
     
-    file_path = './data/nn/generated_mlir/cnn/mlir_linalg.mlir'
+    file_path = './data/nn/generated_mlir/cnn/operations-sequence.json'
     
-    # with open('./full_code_with_tags.mlir', 'r') as file:
-    #     file_content = file.read()
-    
-    a = json.load(open('operation-sequence-3.json'))
+    a = json.load(open(file_path))
     file_content = a[list(a.keys())[0]]['transform_wrapped_operation']
         
     tmp_file =  './tmp/test.mlir'
         
-    out = __lower_linalg_to_loops(file_content, tmp_file)
+    # out = __lower_linalg_to_loops(file_content, tmp_file)
     
-    with open('forloops.mlir', 'w', encoding='utf-8') as file:
-        file.write(out)
+    # with open('forloops.mlir', 'w', encoding='utf-8') as file:
+    #     file.write(out)
     
-    ast = get_raw_ast_info(file_content, tmp_file)
+    ast = extract_bench_features_from_code('bench_1',file_content, 60,60)
     
     with open('ast.txt', 'w', encoding='utf-8') as file:
         file.write(ast)

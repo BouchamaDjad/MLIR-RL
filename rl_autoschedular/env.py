@@ -146,7 +146,7 @@ class Env:
             for i in tqdm(range(len(json_data))):
                 # Get full MLIR code and execution time
                 code = json_data[i][1]["transform_wrapped_operation"]
-                code = fix(code,self.tmp_file)
+                # code = fix(code,self.tmp_file)
                 # code = extract_function(code)
                 exec_time = json_data[i][1]["execution_time"]
                 # Build benchmark features
@@ -275,6 +275,8 @@ class Env:
 
         # The number of loops in the Linalg operations
         num_loops = len(state.operation_features.nested_loops)
+        if num_loops > cfg.max_num_loops:
+            print('',end="")
 
         # preprocess the action coming from the policy network and make it more explicit
         # aka get the transformation and its parameters (equal to None if no parameters are needded)
@@ -311,7 +313,7 @@ class Env:
                 # to prepare it for the optimization in the next iterations
 
                 prints = get_ops_by_tags(transformed_code, [state.operation_tag], self.tmp_file)
-                raw_operation = list(prints.values())[0]
+                raw_operation = list(prints.values())[0] # BUG: prints.values is empty
 
                 operation_features = extract_op_features_from_affine_code(raw_operation, self.tmp_file)
 
@@ -348,6 +350,9 @@ class Env:
                     
                 else:
                     state.producer_tag == None
+
+            elif transformed_code and transformation == 'tiling':
+                state.fused_ops.add(state.operation_tag)
             
 
         else:  # transformation == 'no_transformation' or 'vectorization'
@@ -402,7 +407,7 @@ class Env:
                     code=state.transformed_code,
                     transformation=transformation,
                     parameters=parameters,
-                    timeout=20,
+                    timeout=20, # unused 
                     use_vectorizer=cfg.use_vectorizer
                 )
 
@@ -448,6 +453,7 @@ class Env:
         else:
             # Switch to the Next operation
             if state.operation_index > 0:
+                reward,_ = self.finalize_step(transformed_code, state, reward, transformation, parameters)
 
                 speedup_metric = state.root_exec_time / state.exec_time
                 print('-' * 30)
@@ -461,8 +467,10 @@ class Env:
 
                 # TODO: Check what is happening here
                 # Re-extract operations data from the new code
-                new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
-                self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
+                # new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
+                # self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
+
+                new_bench_data = bench_data
 
                 # Build a new state that points to the next operation
                 new_op_tag = new_bench_data.operation_tags[state.operation_index - 1]
@@ -513,7 +521,7 @@ class Env:
                         exec_time=state.exec_time,
                         root_exec_time=state.root_exec_time,
                         transformation_history=[],
-                        cummulative_reward=state.cummulative_reward,
+                        cummulative_reward=state.cummulative_reward + reward,
                         tmp_file=self.tmp_file
                     )
                 else:
@@ -536,25 +544,7 @@ class Env:
             )
 
         if done:
-            # Execute and evaluate the code
-            if cfg.use_bindings:
-                new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
-            else:
-                new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
-            # Print infos and update reward
-            if new_exec_time is None:
-                reward -= 20
-                print_error(f"EXECUTION ERROR: {transformation} {parameters} {next_state.transformation_history}")
-                new_exec_time = next_state.exec_time
-            else:
-                if bench_passed:
-                    # We calculate the speedup
-                    reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
-                    next_state.exec_time = new_exec_time
-                else:
-                    reward -= 20
-                    print_error("ASSERTION FAILED")
-                    new_exec_time = next_state.exec_time
+            reward,new_exec_time = self.finalize_step(transformed_code, next_state, reward, transformation, parameters)
 
         next_state.cummulative_reward += reward
 
@@ -569,6 +559,29 @@ class Env:
             next_state, next_obs = self.reset()
 
         return next_obs, reward, done, next_state, final_state
+
+    def finalize_step(self, transformed_code, next_state, reward, transformation, parameters):
+         # Execute and evaluate the code
+        if cfg.use_bindings:
+            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
+        else:
+            new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=150)
+        # Print infos and update reward
+        if new_exec_time is None:
+            reward -= 20
+            print_error(f"EXECUTION ERROR: {transformation} {parameters} {next_state.transformation_history}")
+            new_exec_time = next_state.exec_time
+        else:
+            if bench_passed:
+                # We calculate the speedup
+                reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
+                next_state.exec_time = new_exec_time
+            else:
+                reward -= 20
+                print_error("ASSERTION FAILED")
+                new_exec_time = next_state.exec_time
+
+        return reward,new_exec_time
 
     def get_obs_old(self, state: OperationState):
         """Build the obervation vector for the input state.
@@ -684,7 +697,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [False, True, False, False, False, False, True]
+            action_mask[:TP_BEGIN] = [False, True, True, True, False, False, False]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -726,7 +739,6 @@ class Env:
 
         actions_mask = state.actions_mask
 
-        # TODO: interchange and tiling are never allowed
         if transformation == 'img2col':
             actions_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
 
@@ -819,7 +831,7 @@ class Env:
         interchanges = []
         for c in [1, 2, 3]:
             level_interchanges = []
-            for _ in range(cfg.max_num_loops - c):
+            for _ in range(max(cfg.max_num_loops,num_loops) - c):
                 level_interchanges.append(tuple(range(num_loops)))
             for i in range(num_loops - c):
                 params = list(range(num_loops))
@@ -917,7 +929,9 @@ class Env:
         if action_name == 'interchange':
             candidates = self.get_interchange_actions(num_loops)
             parameters = candidates[parameter]
-            assert len(parameters) == num_loops
+            # assert len(parameters) == num_loops         
+            if len(parameters) != num_loops:
+                print("",end="")
             return ['interchange', list(parameters)]
 
         elif action_name == 'img2col':
@@ -946,7 +960,11 @@ class Env:
             for i in range(num_loops):
                 if i < len(parameter):
                     if parameter[i] != -1:
-                        parall_parameters.append(candidates[i][parameter[i]])
+                        if i < len(candidates) and parameter[i] < len(candidates[i]):
+                            parall_parameters.append(candidates[i][parameter[i]])
+                        else:
+                            print_error(f'{candidates=}, {parameter=}')
+                            raise ValueError("list index out of range error")
                     else:  # parameter[i] == -1:
                         parall_parameters.append(0)
                 else:  # i >= len(parameter)

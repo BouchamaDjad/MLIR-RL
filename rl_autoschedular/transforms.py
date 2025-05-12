@@ -552,7 +552,7 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
     elif transformation == 'vectorization':
         # If the operation isn't small enough for vectorization, ignore the transformation
         op_iter_space = 1
-        for nested_loop in operation_features.nested_loops:
+        for nested_loop in  state.operation_features.nested_loops:
             op_iter_space *= nested_loop.upper_bound
         if op_iter_space > cfg.vect_size_limit:
             print_alert(f"REASON: Too large to vectorize {op_iter_space} > {cfg.vect_size_limit}")
@@ -570,14 +570,11 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
             print_alert("REASON: No parameters")
             return ''
         
-        if state.producer_tag is not None:
+        if state.producer_tag is not None and state.producer_tag not in state.fused_ops:
             if state.operation_tag not in state.fused_ops:
                 new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
             else:
-                new_code = transform_dialect_fuse_only(code,state.operation_tag, state.producer_tag, tmp_file)
-            if new_code == code and any([x!=0 for x in parameters]):
-                print("",end="")
-            
+                new_code = transform_dialect_fuse_only(code,state.operation_tag, state.producer_tag, tmp_file)            
         else:
             new_code = code
 

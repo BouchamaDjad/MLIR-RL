@@ -53,6 +53,10 @@ optimizer = torch.optim.Adam(
 # Set neptune logs if enabled
 neptune_logs = init_neptune(['hierchical', 'sparse_reward'] + cfg.tags) if cfg.logging else None
 
+# setting errors hook
+# import better_exceptions
+# better_exceptions.hook()
+
 # Start training
 print_info('Start training ... ')
 tqdm_range = tqdm(range(cfg.nb_iterations), desc='Main loop')

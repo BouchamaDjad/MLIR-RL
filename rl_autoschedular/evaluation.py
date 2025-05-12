@@ -7,6 +7,7 @@ from mlir.passmanager import PassManager
 from typing import Union, Optional
 import multiprocessing
 from rl_autoschedular import config as cfg
+from utils.log import print_alert
 
 
 # ================================== Evaluation Functions (Python Bindings) ==================================
@@ -256,6 +257,7 @@ def evaluate_code_with_cmd_and_timeout(code: str, tmp_file_path: str, timeout: O
 
     if process.is_alive():
         # The function is still running, terminate the process
+        print_alert("TIMEOUT: the current evalution has exceeded the timeout")
         process.terminate()
         process.join()
 

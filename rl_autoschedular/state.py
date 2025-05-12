@@ -85,6 +85,7 @@ class OperationState:
     "tag of the producer operation"
     producer_features: OperationFeatures
     "Features of the producer operation"
+    fused_ops: set
     transformed_code: str
     """The operation string with wrapping and transformations."""
     actions: np.ndarray

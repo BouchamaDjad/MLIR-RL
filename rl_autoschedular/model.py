@@ -374,8 +374,8 @@ class HiearchyModel(nn.Module):
         # Define the mask of each transformation
         transform_mask = action_mask[..., :self.num_transformations]
         TP_mask = action_mask[..., TP_BEGIN:T_BEGIN]
-        TF_mask = action_mask[..., T_BEGIN:TF_BEGIN]
-        T_mask = action_mask[..., TF_BEGIN:I_BEGIN_2C]
+        T_mask = action_mask[..., T_BEGIN:TF_BEGIN]
+        TF_mask = action_mask[..., TF_BEGIN:I_BEGIN_2C]
         I_mask = action_mask[..., I_BEGIN_2C:]
 
         # Model inference:

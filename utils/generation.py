@@ -1362,7 +1362,7 @@ LINALG_OPERATION_GENERATORS = {
     # "conv_1d_nwc_wcf": conv_1d_nwc_wcf,
     # "conv_2d": conv_2d, # Integer use
     "conv_2d_nchw_fchw": conv_2d_nchw_fchw,
-    "conv_2d_ngchw_fgchw": conv_2d_ngchw_fgchw,
+    # "conv_2d_ngchw_fgchw": conv_2d_ngchw_fgchw,
     # "conv_2d_nhwc_fhwc": conv_2d_nhwc_fhwc,
     "conv_2d_nhwc_hwcf": conv_2d_nhwc_hwcf,
     # "conv_3d": conv_3d, to skip
@@ -1389,9 +1389,9 @@ LINALG_OPERATION_GENERATORS = {
     "pooling_nwc_max": pooling_nwc_max,
     "pooling_nwc_sum": pooling_nwc_sum,
     "relu": relu,
-    "softmax_1d": lambda: softmax(dim=1),
+    # "softmax_1d": lambda: softmax(dim=1),
     "softmax_2d": lambda *args: softmax(*args,dim=2),
-    "softmax_3d": lambda *args: softmax(*args, dim=3),
-    "softmax_4d": lambda *args: softmax(*args, dim=4),
+    # "softmax_3d": lambda *args: softmax(*args, dim=3),
+    # "softmax_4d": lambda *args: softmax(*args, dim=4),
     "sigmoid": sigmoid
 }

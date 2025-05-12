@@ -197,6 +197,8 @@ def extract_op_features_from_affine_code_tree(node, maps = None):
     
     parent_node = node.parent
     while parent_node is not None:
+        if parent_node.upper < 0:
+            raise ValueError("upper bound is negative somewhere")
         nested_loops.append(
                 NestedLoopFeatures(
                     arg=parent_node.var_name,
@@ -451,6 +453,8 @@ def extract_op_features_from_affine_code(raw_operation: str, tmp_file_path: str,
             _, arg, _, lower, _, upper, _ = line.strip().split(' ')
             # print(arg, lower, upper)
             # TODO: handle iterator types better
+            if int(upper) < 0:
+                raise ValueError("upper bound is negative somewhere")
             nested_loops.append(
                 NestedLoopFeatures(
                     arg=arg,
@@ -785,6 +789,8 @@ def __extract_bench_features_from_ast_result(bench_name: str, raw_ast_info: str,
             if not nested_loop_str:
                 continue
             arg, low, high, step, iter = nested_loop_str.strip().split(" ")
+            if int(high) < 0:
+                raise ValueError("upper bound is negative somewhere")
             nested_loops.append(NestedLoopFeatures(
                 arg=f'%{arg}',
                 lower_bound=int(low),

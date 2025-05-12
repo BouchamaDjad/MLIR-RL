@@ -1,10 +1,8 @@
 #START_OPERATION
-%1 = linalg.fill {tag = "operation_0"} ins(%cst : f32) outs(%0 : tensor<256x512x15x15xf32>) -> tensor<256x512x15x15xf32>
+%1 = linalg.fill {tag = "operation_0"} ins(%cst_0 : f32) outs(%0 : tensor<3072x512xf32>) -> tensor<3072x512xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
+d0 0 3072 1 parallel
 d1 0 512 1 parallel
-d2 0 15 1 parallel
-d3 0 15 1 parallel
 #START_LOAD_DATA
 #START_OP_COUNT
 + 0
@@ -22,12 +20,10 @@ operation_0
 
 
 #START_OPERATION
-%3 = linalg.fill {tag = "operation_1"} ins(%cst : f32) outs(%2 : tensor<240x512x7x7xf32>) -> tensor<240x512x7x7xf32>
+%3 = linalg.fill {tag = "operation_1"} ins(%cst_0 : f32) outs(%2 : tensor<224x512xf32>) -> tensor<224x512xf32>
 #START_NESTED_LOOPS
-d0 0 240 1 parallel
+d0 0 224 1 parallel
 d1 0 512 1 parallel
-d2 0 7 1 parallel
-d3 0 7 1 parallel
 #START_LOAD_DATA
 #START_OP_COUNT
 + 0
@@ -45,12 +41,10 @@ operation_1
 
 
 #START_OPERATION
-%5 = linalg.fill {tag = "operation_2"} ins(%cst : f32) outs(%4 : tensor<256x240x5x5xf32>) -> tensor<256x240x5x5xf32>
+%5 = linalg.fill {tag = "operation_2"} ins(%cst_0 : f32) outs(%4 : tensor<3072x224xf32>) -> tensor<3072x224xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 240 1 parallel
-d2 0 5 1 parallel
-d3 0 5 1 parallel
+d0 0 3072 1 parallel
+d1 0 224 1 parallel
 #START_LOAD_DATA
 #START_OP_COUNT
 + 0
@@ -68,19 +62,15 @@ operation_2
 
 
 #START_OPERATION
-%7 = linalg.conv_2d_nchw_fchw {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>, tag = "operation_3"} ins(%1, %3 : tensor<256x512x15x15xf32>, tensor<240x512x7x7xf32>) outs(%5 : tensor<256x240x5x5xf32>) -> tensor<256x240x5x5xf32>
+%7 = linalg.matmul_transpose_b {tag = "operation_3"} ins(%1, %3 : tensor<3072x512xf32>, tensor<224x512xf32>) outs(%5 : tensor<3072x224xf32>) -> tensor<3072x224xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 240 1 parallel
-d2 0 5 1 parallel
-d3 0 5 1 parallel
-d4 0 512 1 reduction
-d5 0 7 1 reduction
-d6 0 7 1 reduction
+d0 0 3072 1 parallel
+d1 0 224 1 parallel
+d2 0 512 1 reduction
 #START_LOAD_DATA
-d0, d4, d2 * 2 + d5, d3 * 2 + d6
-d1, d4, d5, d6
-d0, d1, d2, d3
+d0, d2
+d1, d2
+d0, d1
 #START_OP_COUNT
 + 1
 - 0
@@ -97,21 +87,19 @@ operation_3
 
 
 #START_OPERATION
-%10 = linalg.pooling_nchw_sum {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>, tag = "operation_4"} ins(%7, %8 : tensor<256x240x5x5xf32>, tensor<3x3xf32>) outs(%9 : tensor<256x240x3x3xf32>) -> tensor<256x240x3x3xf32>
+%10 = linalg.matmul_transpose_b {tag = "operation_4"} ins(%7, %8 : tensor<3072x224xf32>, tensor<28x224xf32>) outs(%9 : tensor<3072x28xf32>) -> tensor<3072x28xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 240 1 parallel
-d2 0 3 1 parallel
-d3 0 3 1 parallel
-d4 0 3 1 reduction
-d5 0 3 1 reduction
+d0 0 3072 1 parallel
+d1 0 28 1 parallel
+d2 0 224 1 reduction
 #START_LOAD_DATA
-d0, d1, d2 + d4, d3 + d5
-d0, d1, d2, d3
+d0, d2
+d1, d2
+d0, d1
 #START_OP_COUNT
 + 1
 - 0
-* 0
+* 1
 / 0
 exp 0
 #START_TAG
@@ -124,19 +112,12 @@ operation_4
 
 
 #START_OPERATION
-%13 = linalg.pooling_nhwc_sum {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>, tag = "operation_5"} ins(%10, %11 : tensor<256x240x3x3xf32>, tensor<1x1xf32>) outs(%12 : tensor<256x120x2x3xf32>) -> tensor<256x120x2x3xf32>
+%13 = linalg.fill {tag = "operation_5"} ins(%cst : f32) outs(%12 : tensor<3072xf32>) -> tensor<3072xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 120 1 parallel
-d2 0 2 1 parallel
-d3 0 3 1 parallel
-d4 0 1 1 reduction
-d5 0 1 1 reduction
+d0 0 3072 1 parallel
 #START_LOAD_DATA
-d0, d1 * 2 + d4, d2 * 2 + d5, d3
-d0, d1, d2, d3
 #START_OP_COUNT
-+ 1
++ 0
 - 0
 * 0
 / 0
@@ -151,23 +132,103 @@ operation_5
 
 
 #START_OPERATION
-%16 = linalg.add {tag = "operation_6"} ins(%13, %14 : tensor<256x120x2x3xf32>, tensor<256x120x2x3xf32>) outs(%15 : tensor<256x120x2x3xf32>) -> tensor<256x120x2x3xf32>
+%reduced = linalg.reduce ins(%10 : tensor<3072x28xf32>) outs(%13 : tensor<3072xf32>) dimensions = [1]  {tag = "operation_6"}
+  (%in: f32, %init: f32) {
+    %23 = arith.maximumf %in, %init : f32
+    linalg.yield %23 : f32
+  }
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 120 1 parallel
-d2 0 2 1 parallel
-d3 0 3 1 parallel
+d0 0 3072 1 parallel
+d1 0 28 1 reduction
 #START_LOAD_DATA
-d0, d1, d2, d3
-d0, d1, d2, d3
+d0, d1
+d0
 #START_OP_COUNT
-+ 1
++ 0
 - 0
 * 0
 / 0
 exp 0
 #START_TAG
 operation_6
+#END_OPERATION
+
+
+
+
+
+
+#START_OPERATION
+%14 = linalg.generic {indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d0, d1)>], iterator_types = ["parallel", "parallel"], library_call = "none"} ins(%10, %reduced : tensor<3072x28xf32>, tensor<3072xf32>) outs(%11 : tensor<3072x28xf32>) attrs =  {tag = "operation_7"} {
+^bb0(%in: f32, %in_1: f32, %out: f32):
+  %23 = arith.subf %in, %in_1 : f32
+  %24 = math.exp %23 : f32
+  linalg.yield %24 : f32
+} -> tensor<3072x28xf32>
+#START_NESTED_LOOPS
+d0 0 3072 1 parallel
+d1 0 28 1 parallel
+#START_LOAD_DATA
+d0, d1
+d0
+#START_OP_COUNT
++ 0
+- 1
+* 0
+/ 0
+exp 1
+#START_TAG
+operation_7
+#END_OPERATION
+
+
+
+
+
+
+#START_OPERATION
+%17 = linalg.matmul_transpose_b {tag = "operation_8"} ins(%14, %15 : tensor<3072x28xf32>, tensor<228x28xf32>) outs(%16 : tensor<3072x228xf32>) -> tensor<3072x228xf32>
+#START_NESTED_LOOPS
+d0 0 3072 1 parallel
+d1 0 228 1 parallel
+d2 0 28 1 reduction
+#START_LOAD_DATA
+d0, d2
+d1, d2
+d0, d1
+#START_OP_COUNT
++ 1
+- 0
+* 1
+/ 0
+exp 0
+#START_TAG
+operation_8
+#END_OPERATION
+
+
+
+
+
+
+#START_OPERATION
+%25 = linalg.matmul_transpose_b {tag = "operation_9"} ins(%extracted_slice_2, %extracted_slice_3 : tensor<32x228xf32>, tensor<4x228xf32>) outs(%extracted_slice_4 : tensor<32x4xf32>) -> tensor<32x4xf32>
+#START_NESTED_LOOPS
+d0 0 32 1 parallel
+d1 0 4 1 parallel
+d2 0 228 1 reduction
+#START_LOAD_DATA
+d0, d2
+d1, d2
+d0, d1
+#START_OP_COUNT
++ 1
+- 0
+* 1
+/ 0
+exp 0
+#START_TAG
+operation_9
 #END_OPERATION
 
 
@@ -185,60 +246,89 @@ operation_0 --> operation_3
 operation_1 --> operation_3
 operation_2 --> operation_3
 operation_3 --> operation_4
-operation_4 --> operation_5
+operation_4 --> operation_6
 operation_5 --> operation_6
+operation_4 --> operation_7
+operation_6 --> operation_7
+operation_7 --> operation_8
 #END_GRAPH
 ########################################
+#map = affine_map<(d0, d1) -> (d0, d1)>
+#map1 = affine_map<(d0, d1) -> (d0)>
 module attributes {torch.debug_module_name = "Net"} {
   func.func private @nanoTime() -> i64 attributes {llvm.emit_c_interface}
   func.func private @printFlops(f64)
   func.func private @printI64(i64)
   func.func private @printNewline()
   func.func private @printMemrefF32(tensor<*xf32>)
-  func.func @matmul() -> tensor<256x120x2x3xf32> {
-    %cst = arith.constant 2.000000e+00 : f32
-    %0 = bufferization.alloc_tensor() : tensor<256x512x15x15xf32>
-    %1 = linalg.fill {tag = "operation_0"} ins(%cst : f32) outs(%0 : tensor<256x512x15x15xf32>) -> tensor<256x512x15x15xf32>
-    %2 = bufferization.alloc_tensor() : tensor<240x512x7x7xf32>
-    %3 = linalg.fill {tag = "operation_1"} ins(%cst : f32) outs(%2 : tensor<240x512x7x7xf32>) -> tensor<240x512x7x7xf32>
-    %4 = bufferization.alloc_tensor() : tensor<256x240x5x5xf32>
-    %5 = linalg.fill {tag = "operation_2"} ins(%cst : f32) outs(%4 : tensor<256x240x5x5xf32>) -> tensor<256x240x5x5xf32>
+  func.func @matmul() -> tensor<3072x28xf32> {
+    %c4 = arith.constant 4 : index
+    %c28 = arith.constant 28 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+    %c3072 = arith.constant 3072 : index
+    %c0 = arith.constant 0 : index
+    %cst = arith.constant 0.000000e+00 : f32
+    %cst_0 = arith.constant 2.000000e+00 : f32
+    %0 = bufferization.alloc_tensor() : tensor<3072x512xf32>
+    %1 = linalg.fill {tag = "operation_0"} ins(%cst_0 : f32) outs(%0 : tensor<3072x512xf32>) -> tensor<3072x512xf32>
+    %2 = bufferization.alloc_tensor() : tensor<224x512xf32>
+    %3 = linalg.fill {tag = "operation_1"} ins(%cst_0 : f32) outs(%2 : tensor<224x512xf32>) -> tensor<224x512xf32>
+    %4 = bufferization.alloc_tensor() : tensor<3072x224xf32>
+    %5 = linalg.fill {tag = "operation_2"} ins(%cst_0 : f32) outs(%4 : tensor<3072x224xf32>) -> tensor<3072x224xf32>
     %6 = call @nanoTime() : () -> i64
-    %7 = linalg.conv_2d_nchw_fchw {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>, tag = "operation_3"} ins(%1, %3 : tensor<256x512x15x15xf32>, tensor<240x512x7x7xf32>) outs(%5 : tensor<256x240x5x5xf32>) -> tensor<256x240x5x5xf32>
-    %8 = bufferization.alloc_tensor() : tensor<3x3xf32>
-    %9 = bufferization.alloc_tensor() : tensor<256x240x3x3xf32>
-    %10 = linalg.pooling_nchw_sum {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>, tag = "operation_4"} ins(%7, %8 : tensor<256x240x5x5xf32>, tensor<3x3xf32>) outs(%9 : tensor<256x240x3x3xf32>) -> tensor<256x240x3x3xf32>
-    %11 = bufferization.alloc_tensor() : tensor<1x1xf32>
-    %12 = bufferization.alloc_tensor() : tensor<256x120x2x3xf32>
-    %13 = linalg.pooling_nhwc_sum {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>, tag = "operation_5"} ins(%10, %11 : tensor<256x240x3x3xf32>, tensor<1x1xf32>) outs(%12 : tensor<256x120x2x3xf32>) -> tensor<256x120x2x3xf32>
-    %14 = bufferization.alloc_tensor() : tensor<256x120x2x3xf32>
-    %15 = bufferization.alloc_tensor() : tensor<256x120x2x3xf32>
-    %16 = linalg.add {tag = "operation_6"} ins(%13, %14 : tensor<256x120x2x3xf32>, tensor<256x120x2x3xf32>) outs(%15 : tensor<256x120x2x3xf32>) -> tensor<256x120x2x3xf32>
-    %17 = call @nanoTime() : () -> i64
-    %18 = arith.subi %17, %6 : i64
-    call @printI64(%18) : (i64) -> ()
+    %7 = linalg.matmul_transpose_b {tag = "operation_3"} ins(%1, %3 : tensor<3072x512xf32>, tensor<224x512xf32>) outs(%5 : tensor<3072x224xf32>) -> tensor<3072x224xf32>
+    %8 = bufferization.alloc_tensor() : tensor<28x224xf32>
+    %9 = bufferization.alloc_tensor() : tensor<3072x28xf32>
+    %10 = linalg.matmul_transpose_b {tag = "operation_4"} ins(%7, %8 : tensor<3072x224xf32>, tensor<28x224xf32>) outs(%9 : tensor<3072x28xf32>) -> tensor<3072x28xf32>
+    %11 = bufferization.alloc_tensor() : tensor<3072x28xf32>
+    %12 = bufferization.alloc_tensor() : tensor<3072xf32>
+    %13 = linalg.fill {tag = "operation_5"} ins(%cst : f32) outs(%12 : tensor<3072xf32>) -> tensor<3072xf32>
+    %reduced = linalg.reduce ins(%10 : tensor<3072x28xf32>) outs(%13 : tensor<3072xf32>) dimensions = [1]  {tag = "operation_6"}
+      (%in: f32, %init: f32) {
+        %23 = arith.maximumf %in, %init : f32
+        linalg.yield %23 : f32
+      }
+    %14 = linalg.generic {indexing_maps = [#map, #map1, #map], iterator_types = ["parallel", "parallel"], library_call = "none"} ins(%10, %reduced : tensor<3072x28xf32>, tensor<3072xf32>) outs(%11 : tensor<3072x28xf32>) attrs =  {tag = "operation_7"} {
+    ^bb0(%in: f32, %in_1: f32, %out: f32):
+      %23 = arith.subf %in, %in_1 : f32
+      %24 = math.exp %23 : f32
+      linalg.yield %24 : f32
+    } -> tensor<3072x28xf32>
+    %15 = bufferization.alloc_tensor() : tensor<228x28xf32>
+    %16 = bufferization.alloc_tensor() : tensor<3072x228xf32>
+    %17 = linalg.matmul_transpose_b {tag = "operation_8"} ins(%14, %15 : tensor<3072x28xf32>, tensor<228x28xf32>) outs(%16 : tensor<3072x228xf32>) -> tensor<3072x228xf32>
+    %18 = bufferization.alloc_tensor() : tensor<28x228xf32>
+    %19 = bufferization.alloc_tensor() : tensor<3072x28xf32>
+    %20 = scf.for %arg0 = %c0 to %c3072 step %c64 iter_args(%arg1 = %19) -> (tensor<3072x28xf32>) {
+      %extracted_slice = tensor.extract_slice %17[%arg0, 0] [64, 228] [1, 1] : tensor<3072x228xf32> to tensor<64x228xf32>
+      %extracted_slice_1 = tensor.extract_slice %arg1[%arg0, 0] [64, 28] [1, 1] : tensor<3072x28xf32> to tensor<64x28xf32>
+      %23 = scf.for %arg2 = %c0 to %c64 step %c32 iter_args(%arg3 = %extracted_slice_1) -> (tensor<64x28xf32>) {
+        %24 = scf.for %arg4 = %c0 to %c28 step %c4 iter_args(%arg5 = %arg3) -> (tensor<64x28xf32>) {
+          %extracted_slice_2 = tensor.extract_slice %extracted_slice[%arg2, 0] [32, 228] [1, 1] : tensor<64x228xf32> to tensor<32x228xf32>
+          %extracted_slice_3 = tensor.extract_slice %18[%arg4, 0] [4, 228] [1, 1] : tensor<28x228xf32> to tensor<4x228xf32>
+          %extracted_slice_4 = tensor.extract_slice %arg5[%arg2, %arg4] [32, 4] [1, 1] : tensor<64x28xf32> to tensor<32x4xf32>
+          %25 = linalg.matmul_transpose_b {tag = "operation_9"} ins(%extracted_slice_2, %extracted_slice_3 : tensor<32x228xf32>, tensor<4x228xf32>) outs(%extracted_slice_4 : tensor<32x4xf32>) -> tensor<32x4xf32>
+          %inserted_slice_5 = tensor.insert_slice %25 into %arg5[%arg2, %arg4] [32, 4] [1, 1] : tensor<32x4xf32> into tensor<64x28xf32>
+          scf.yield %inserted_slice_5 : tensor<64x28xf32>
+        }
+        scf.yield %24 : tensor<64x28xf32>
+      }
+      %inserted_slice = tensor.insert_slice %23 into %arg1[%arg0, 0] [64, 28] [1, 1] : tensor<64x28xf32> into tensor<3072x28xf32>
+      scf.yield %inserted_slice : tensor<3072x28xf32>
+    }
+    %21 = call @nanoTime() : () -> i64
+    %22 = arith.subi %21, %6 : i64
+    call @printI64(%22) : (i64) -> ()
     call @printNewline() : () -> ()
-    return %16 : tensor<256x120x2x3xf32>
+    return %20 : tensor<3072x28xf32>
   }
   func.func @main() {
     %c1 = arith.constant 1 : index
     %c0 = arith.constant 0 : index
     %c2 = arith.constant 2 : index
     scf.for %arg0 = %c0 to %c2 step %c1 {
-      %0 = bufferization.alloc_tensor() : tensor<256x512x15x15xf32>
-      %1 = bufferization.alloc_tensor() : tensor<240x512x7x7xf32>
-      %2 = bufferization.alloc_tensor() : tensor<256x240x5x5xf32>
-      %3 = func.call @nanoTime() : () -> i64
-      %4 = bufferization.alloc_tensor() : tensor<3x3xf32>
-      %5 = bufferization.alloc_tensor() : tensor<256x240x3x3xf32>
-      %6 = bufferization.alloc_tensor() : tensor<1x1xf32>
-      %7 = bufferization.alloc_tensor() : tensor<256x120x2x3xf32>
-      %8 = bufferization.alloc_tensor() : tensor<256x120x2x3xf32>
-      %9 = bufferization.alloc_tensor() : tensor<256x120x2x3xf32>
-      %10 = func.call @nanoTime() : () -> i64
-      %11 = arith.subi %10, %3 : i64
-      func.call @printI64(%11) : (i64) -> ()
-      func.call @printNewline() : () -> ()
+      %0 = func.call @matmul() : () -> tensor<3072x28xf32>
     }
     return
   }

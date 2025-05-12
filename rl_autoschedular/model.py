@@ -208,7 +208,7 @@ class HiearchyModel(nn.Module):
         SD = cfg.max_num_stores_loads
         self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate + 6 # TODO: rechange it once the observation vector is finalized
         
-        self.comp_embed_layer_sizes=[600, 350, 200, 411] # 411 = 1 + L + L * D * SD + L * D + 5 + 6
+        self.comp_embed_layer_sizes=[600, 350, 512, 512] # 411 = 1 + L + L * D * SD + L * D + 5 + 6
         self.drops=[0.225, 0.225, 0.225, 0.225]        
         self.num_loops = L
         self.num_transformations = cfg.num_transformations
@@ -239,7 +239,7 @@ class HiearchyModel(nn.Module):
         self.ELU = nn.ELU()
         
         self.comps_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            411, embedding_size, batch_first=True
         )
         
         # LSTM to encode child loop levels
@@ -347,6 +347,8 @@ class HiearchyModel(nn.Module):
         
         lstm_out, (roots_h_n, roots_c_n) = self.roots_lstm(roots_tensor)
         roots_h_n = roots_h_n.permute(1, 0, 2)
+        
+        print('roots_h_n shape:',roots_h_n.shape)
         
         x = roots_h_n[0]
         

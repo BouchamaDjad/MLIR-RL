@@ -448,14 +448,35 @@ class Env:
         else:
             # Switch to the Next operation
             if state.operation_index > 0:
+                
+            # Execute and evaluate the code
+                if cfg.use_bindings:
+                    new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
+                else:
+                    new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
+                # Print infos and update reward
+                if new_exec_time is None:
+                    reward -= 20
+                    print_error(f"EXECUTION ERROR: {transformation} {parameters} {state.transformation_history}")
+                    new_exec_time = state.exec_time
+                else:
+                    if bench_passed:
+                        # We calculate the speedup
+                        reward += self.speedup_reward(new_exec_time, state.root_exec_time)
+                    else:
+                        reward -= 20
+                        print_error("ASSERTION FAILED")
+                        new_exec_time = state.exec_time
+                
 
-                speedup_metric = state.root_exec_time / state.exec_time
+                speedup_metric = state.exec_time / new_exec_time
                 print('-' * 30)
                 print(f"Operation: {state.bench_name} - {state.operation_tag}")
                 print(state.transformation_history)
                 print('Relative speedup:', speedup_metric)
-                print('Old Exec time:', state.root_exec_time * 10**-9, 's')
-                print('New Exec time:', state.exec_time * 10**-9, 's')
+                print('root Exec time:', state.root_exec_time * 10**-9, 's')
+                print('Old Exec time:', state.exec_time * 10**-9, 's')
+                print('New Exec time:', new_exec_time * 10**-9, 's')
                 print(f"reward: {reward}")
                 print(f"cummulative reward: {state.cummulative_reward + reward}")
 
@@ -662,7 +683,7 @@ class Env:
                         : 4-consecutive interchanges: L - 3
                 Interchange: 3L - 6
 
-            action_mask[:NUM_TRANSFORMATIONS] = [no_transform, TP, T, TF, I, vect, img2col]
+            action_mask[:NUM_TRANSFORMATIONS] = [no_transform, TP, T, I, vect, img2col, TF]
 
         Args:
             num_loops (int): The number of loops in the operation.

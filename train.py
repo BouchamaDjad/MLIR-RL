@@ -51,11 +51,11 @@ optimizer = torch.optim.Adam(
 )
 
 # Set neptune logs if enabled
-neptune_logs = init_neptune(['hierchical', 'sparse_reward'] + cfg.tags) if cfg.logging else None
+neptune_logs = init_neptune(cfg.tags) if cfg.logging else None
 
 # setting errors hook
-# import better_exceptions
-# better_exceptions.hook()
+import better_exceptions
+better_exceptions.hook()
 
 # Start training
 print_info('Start training ... ')
@@ -83,16 +83,16 @@ for step in tqdm_range:
 
     torch.save(model.state_dict(), 'models/ppo_model.pt')
 
-    if step % 5 == 0:
-        evaluate_benchmark(
-            model=model,
-            env=eval_env,
-            device=device,
-            neptune_logs=neptune_logs
-        )
+    # if step % 5 == 0:
+        # evaluate_benchmark(
+        #     model=model,
+        #     env=eval_env,
+        #     device=device,
+        #     neptune_logs=neptune_logs
+        # )
 
-        if cfg.logging:
-            neptune_logs["params"].upload_files(['models/ppo_model.pt'])
+        # if cfg.logging:
+        #     neptune_logs["params"].upload_files(['models/ppo_model.pt'])
 
 
 # Stop logs if enabled

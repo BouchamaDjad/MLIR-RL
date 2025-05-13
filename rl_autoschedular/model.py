@@ -239,22 +239,21 @@ class HiearchyModel(nn.Module):
         self.ELU = nn.ELU()
         
         self.comps_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            embedding_size, embedding_size, batch_first=True
         )
         
         # LSTM to encode child loop levels
         self.nodes_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            embedding_size, embedding_size, batch_first=True
         )
         
         self.roots_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], self.input_dim, batch_first=True
-        )
-        
+            512*2, 512, batch_first=True
+        )        
         
 
         self.backbone = nn.Sequential(
-            nn.Linear(self.input_dim, 512),
+            nn.Linear(embedding_size, 512),
             nn.ReLU(),
             nn.Linear(512, 512),
             nn.ReLU(),
@@ -263,7 +262,7 @@ class HiearchyModel(nn.Module):
         )
 
         self.value_network = nn.Sequential(
-            nn.Linear(self.input_dim, 512),
+            nn.Linear(embedding_size, 512),
             nn.ReLU(),
             nn.Linear(512, 512),
             nn.ReLU(),
@@ -343,12 +342,8 @@ class HiearchyModel(nn.Module):
         current_obs = self.get_hidden_state(current_tree)
         previous_obs = self.get_hidden_state(previous_tree)
         
-        roots_tensor = torch.cat([current_obs,previous_obs], 1)
-        
-        lstm_out, (roots_h_n, roots_c_n) = self.roots_lstm(roots_tensor)
-        roots_h_n = roots_h_n.permute(1, 0, 2)
-        
-        x = roots_h_n[0]
+        x = current_obs[0]
+        prev_x = previous_obs[0]
         
         *leading_dims, _ = x.shape
 
@@ -385,13 +380,22 @@ class HiearchyModel(nn.Module):
         # _, ( embedding,  _) = self.lstm(input) # output shape = (batch, seq_lenght, hidden) input shape = (batch, seq, input size)
 
         x1 = self.backbone(x)
+        prev_x1 = self.backbone(prev_x)
+
+
         transformation_logits = self.transformation_selection(x1)
         interchange_logits = self.interchange_fc(x1)
         tiling_logits = self.tiling_fc(x1)
         parall_logits = self.parall_fc(x1)
-        fusion_logits = self.fusion_fc(x1)
 
-        values = self.value_network(x)
+        roots_tensor = torch.cat([x1.unsqueeze(1),prev_x1.unsqueeze(1)], 2)
+        
+        _, (roots_h_n, _) = self.roots_lstm(roots_tensor)
+        roots_h_n = roots_h_n.permute(1, 0, 2)
+
+        fusion_logits = self.fusion_fc(roots_h_n[0])
+
+        values = self.value_network(x) # TODO: check whether we need to pass the prev_x1 as well
 
         tiling_logits = tiling_logits.reshape(*leading_dims, self.num_loops, self.num_tiles + 1)
         parall_logits = parall_logits.reshape(*leading_dims, self.num_loops, self.num_tiles + 1)

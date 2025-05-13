@@ -530,10 +530,12 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
 
     code = code.strip()
 
-    # Re-extract loop data if it's gonna be needed afterwards
-    if transformation in ['parallelization', 'vectorization']:
-        new_benchmark_features = extract_bench_features_from_code(state.bench_name, code, bench_features.root_exec_time, state.exec_time)
-        operation_features = new_benchmark_features.operations[state.operation_tag]
+    # # Re-extract loop data if it's gonna be needed afterwards
+    # if transformation in ['parallelization', 'vectorization']:
+    #     new_benchmark_features = extract_bench_features_from_code(state.bench_name, code, bench_features.root_exec_time, state.exec_time)
+    #     operation_features = new_benchmark_features.operations[state.operation_tag]
+    # else:
+    operation_features = state.operation_features
 
     if transformation == 'tiling':
         if not parameters:
@@ -544,7 +546,7 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
         if not parameters:
             print_alert("REASON: No parameters")
             return ''
-        new_code = transform_dialect_TP(code, state.operation_tag, parameters, state.operation_features.nested_loops, tmp_file)
+        new_code = transform_dialect_TP(code, state.operation_tag, parameters, operation_features.nested_loops, tmp_file)
     elif transformation == 'interchange':
         new_code = transform_dialect_interchange(code, state.operation_tag, parameters, tmp_file)
     elif transformation == 'img2col':
@@ -552,7 +554,7 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
     elif transformation == 'vectorization':
         # If the operation isn't small enough for vectorization, ignore the transformation
         op_iter_space = 1
-        for nested_loop in  state.operation_features.nested_loops:
+        for nested_loop in  operation_features.nested_loops:
             op_iter_space *= nested_loop.upper_bound
         if op_iter_space > cfg.vect_size_limit:
             print_alert(f"REASON: Too large to vectorize {op_iter_space} > {cfg.vect_size_limit}")

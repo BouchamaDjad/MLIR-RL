@@ -419,7 +419,9 @@ class Env:
                 print("",end="")
             print_error(f'FAILED TRANSFORM: {transformation} {parameters} {state.transformation_history}')
             transformed_code = state.transformed_code
-            reward -= 5        
+            reward -= 5  
+
+        re_finalized = True      
         
         if transformation not in ['no_transformation', 'vectorization'] and state.step_count < cfg.truncate and \
             not state.operation_type == "unknown":
@@ -454,6 +456,7 @@ class Env:
             # Switch to the Next operation
             if state.operation_index > 0:
                 reward,_ = self.finalize_step(transformed_code, state, reward, transformation, parameters)
+                re_finalized = False
 
                 speedup_metric = state.root_exec_time / state.exec_time
                 print('-' * 30)
@@ -525,6 +528,7 @@ class Env:
                         tmp_file=self.tmp_file
                     )
                 else:
+                    
                     next_state = state
                     next_state.operation_index = 0
 
@@ -544,7 +548,9 @@ class Env:
             )
 
         if done:
-            reward,new_exec_time = self.finalize_step(transformed_code, next_state, reward, transformation, parameters)
+            next_state.transformation_history = state.transformation_history + [(transformation, parameters)]
+            if re_finalized:
+                reward,_ = self.finalize_step(transformed_code, next_state, reward, transformation, parameters)
 
         next_state.cummulative_reward += reward
 

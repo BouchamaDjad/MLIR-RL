@@ -413,6 +413,10 @@ class Env:
             if transformation in ['fusion', 'parallelization', 'img2col']:
                 print("",end="")
             print_error(f'FAILED TRANSFORM: {transformation} {parameters} {state.transformation_history}')
+            # This will create the file if it doesn't exist, or overwrite it if it does
+            with open(f'./errors_files/{self.bench_index}_{state.operation_tag}.mlir', 'w') as f:
+                f.write(bench_data.code)
+
             transformed_code = state.transformed_code
             reward -= 5        
         
@@ -482,12 +486,12 @@ class Env:
 
                 # TODO: Check what is happening here
                 # Re-extract operations data from the new code
-                new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
-                self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
+                # new_bench_data = extract_bench_features_from_code(bench_name, state.transformed_code, bench_data.root_exec_time, state.exec_time)
+                # self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
 
                 # Build a new state that points to the next operation
-                new_op_tag = new_bench_data.operation_tags[state.operation_index - 1]
-                new_op_features = new_bench_data.operations[new_op_tag]
+                new_op_tag = bench_data.operation_tags[state.operation_index - 1]
+                new_op_features = bench_data.operations[new_op_tag]
                 
                 operation_index = state.operation_index - 1
                 raw_operation = new_op_features.raw_operation
@@ -507,8 +511,8 @@ class Env:
                     print_alert(f"skipping: {raw_operation}")
 
                     operation_index = operation_index - 1
-                    new_op_tag = new_bench_data.operation_tags[operation_index]
-                    new_op_features = new_bench_data.operations[new_op_tag]
+                    new_op_tag = bench_data.operation_tags[operation_index]
+                    new_op_features = bench_data.operations[new_op_tag]
 
                     raw_operation = new_op_features.raw_operation
                     new_operation_type = get_operation_type(raw_operation)
@@ -527,7 +531,7 @@ class Env:
                         producer_tag = producer_tag,
                         producer_features = producer_features,
                         fused_ops = state.fused_ops,
-                        transformed_code=new_bench_data.code,
+                        transformed_code=transformed_code,
                         actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
                         actions_mask=actions_mask,
                         step_count=0,
@@ -705,7 +709,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [False, True, False, False, False, False, True]
+            action_mask[:TP_BEGIN] = [False, True, True, False, True, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -750,6 +754,9 @@ class Env:
         # TODO: interchange and tiling are never allowed
         if transformation == 'img2col':
             actions_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
+        
+        if transformation == "fusion":
+            actions_mask[:TP_BEGIN] = [False, False, False, False, True, False, False]
 
         if state.operation_type == "pooling" or state.operation_type == "conv_2d":
             if transformation == 'parallelization':
@@ -787,8 +794,7 @@ class Env:
         else:
             raise ValueError("operation_type must be in [pooling, conv_2d, conv_2d+img2col, matmul, add, generic, func.call]")
         
-        # if transformation == "fusion":
-        #         actions_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
+        
 
         if num_loops == 1:
             actions_mask[3] = False

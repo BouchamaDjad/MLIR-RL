@@ -1125,10 +1125,11 @@ def softmax(*args,dim=3):
     func.func private @softmax(%input: tensor<{SHAPE}>, %output: tensor<{SHAPE}>) -> tensor<{SHAPE}> attributes {{ "func.inline" = unit }} {{
     %zero = arith.constant 0.00000e+00 : f32
     // Allocate temporary tensors for max and sum computations\n"""
-    f"""%tmp_max = bufferization.alloc_tensor() : tensor<{Fill_SHAPE}>\n""" 
+    f"""//%tmp_max = bufferization.alloc_tensor() : tensor<{Fill_SHAPE}>\n""" 
     f"""
     // Inline compute_max functionality
-    %filled = linalg.fill ins(%zero : f32) outs(%tmp_max : tensor<{Fill_SHAPE}>) -> tensor<{Fill_SHAPE}>
+    // %filled = linalg.fill ins(%zero : f32) outs(%tmp_max : tensor<{Fill_SHAPE}>) -> tensor<{Fill_SHAPE}>
+    %filled = bufferization.alloc_tensor() : tensor<{Fill_SHAPE}>
     %max = linalg.reduce ins(%input: tensor<{SHAPE}>)
                             outs(%filled: tensor<{Fill_SHAPE}>) 
                             dimensions = [{dim - 1}]
@@ -1355,10 +1356,10 @@ LINALG_OPERATION_GENERATORS = {
     # "batch_matmul_transpose_b": batch_matmul_transpose_b,
     # "batch_reduce_matmul": batch_reduce_matmul,
     "matmul": matmul,
-    "matmul_transpose_a": matmul_transpose_a,
-    "matmul_transpose_b": matmul_transpose_b,
+    # "matmul_transpose_a": matmul_transpose_a,
+    # "matmul_transpose_b": matmul_transpose_b,
     # "conv_1d": conv_1d,
-    # "conv_1d_ncw_fcw": conv_1d_ncw_fcw,
+    # "conv_1d_ncw_fcw": conv_1d_ncw_fcw,j
     # "conv_1d_nwc_wcf": conv_1d_nwc_wcf,
     # "conv_2d": conv_2d, # Integer use
     "conv_2d_nchw_fchw": conv_2d_nchw_fchw,

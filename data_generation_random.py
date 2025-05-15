@@ -75,7 +75,7 @@ if __name__ == '__main__':
 
     # print_info(args.input_file,args.output_file)
 
-    args = ParserMock(input_file="config/config.yaml",output_file="final-operation-sequence-4.json")
+    args = ParserMock(input_file="config/config.yaml",output_file="final-operation-sequence-5.json")
     
     with open(args.input_file, 'r') as file:
         config = yaml.safe_load(file)
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     # }
 
     operations_config = {
-        "randomSubGraph": (randomSubGraph, 600)
+        "randomSubGraph": (randomSubGraph, 1000)
     }
 
     # print( sum( amount for _, (_, amount) in operations_config.items() ) )
@@ -153,7 +153,7 @@ if __name__ == '__main__':
             if exec_time:
                 # print("write in progress")
                 
-                all_operations[f"{raw_operation}"] = {
+                all_operations[f"bench_{i}"] = {
                     "operation": raw_operation,  # The raw operation
                     "transform_wrapped_operation": transform_wrapped_operation,  # The transformed wrapped operation
                     "loops_data": loops_data,  # Data related to the loops in the operation
@@ -163,5 +163,15 @@ if __name__ == '__main__':
                 continue  # If no valid execution time, skip to the next iteration
         
         # Write all the collected operation data to the output file in JSON format
+    
+    # Remove duplicates from all_operations based on 'transform_wrapped_operation'
+    unique_operations = {}
+    unique_transforms_wrapped = set()
+    
+    for key, value in all_operations.items():
+        if value["transform_wrapped_operation"] not in unique_transforms_wrapped:
+            unique_transforms_wrapped.add(value["transform_wrapped_operation"])
+            unique_operations[key] = value
+
     with open(args.output_file, 'w') as file:
-        json.dump(all_operations, file)
+        json.dump(unique_operations, file)

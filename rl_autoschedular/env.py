@@ -142,7 +142,6 @@ class Env:
             json_data = [(details['operation'], details) for _, details in json_data.items()]
 
             # Get the AST of the MLIR code and give a tag to each linalg operation
-            # The last operation represents the operations that we want to optimize (the first operations are just linalg.fills)
             for i in tqdm(range(len(json_data))):
                 # Get full MLIR code and execution time
                 code = json_data[i][1]["transform_wrapped_operation"]

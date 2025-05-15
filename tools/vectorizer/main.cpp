@@ -192,4 +192,4 @@ int main(int argc, char **argv)
 // cmake .. -DMLIR_DIR=$LLVM_BUILD_PATH/lib/cmake/mlir -DLLVM_EXTERNAL_LIT=$LLVM_BUILD_PATH/bin/llvm-lit
 // cd ../../..
 // cmake --build tools/vectorizer/build
-// tools/vectorizer/build/bin/AstDumper example.mlir operation_1
+// tools/vectorizer/build/bin/Vectorizer example.mlir operation_1

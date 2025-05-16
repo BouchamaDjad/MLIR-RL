@@ -424,7 +424,7 @@ class Env:
                 )
                 
             # if we vectorise an operation check if fill op exist in its producers, if yes fuse them and vectorise
-            if transformation == 'vectorisation'
+            if transformation == 'vectorization'
                for producer_tag in state.operation_features.producers:
                    prod_features = bench_data.operations[producer_tag]
                    op_type = get_operation_type(prod_features.raw_operation)
@@ -462,7 +462,11 @@ class Env:
 
             # Update action mask:
             new_actions_mask = self.update_action_mask(state, transformation, num_loops)
-
+            
+            if transformation == 'fusion':
+                # change the mask to only allow vectorisation in the next step
+                new_actions_mask = [True if i == 4 else False if i < 10 else new_actions_mask[i] for i in range(len(cfg.num_transformations))]
+            
             next_state = OperationState(
                 bench_name=state.bench_name,
                 operation_tag=state.operation_tag,

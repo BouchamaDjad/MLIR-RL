@@ -572,14 +572,12 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
             print_alert("REASON: No parameters")
             return ''
         
-        if state.producer_tag is not None:
+        if state.consumer_tag is not None:
             if state.operation_tag not in state.fused_ops:
-                new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
+                new_code = transform_dialect_fusion(code, state.consumer_tag, state.operation_tag, parameters ,tmp_file)
             else:
-                new_code = transform_dialect_fuse_only(code,state.operation_tag, state.producer_tag, tmp_file)
-            if new_code == code and any([x!=0 for x in parameters]):
-                print("",end="")
-            
+                new_code = transform_dialect_fuse_only(code, state.consumer_tag, state.operation_tag, tmp_file)
+           
         else:
             new_code = code
 

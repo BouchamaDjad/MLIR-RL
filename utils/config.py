@@ -32,6 +32,8 @@ class Config(metaclass=Singleton):
     """Length of the trajectory"""
     ppo_batch_size: int
     """Batch size for PPO"""
+    train_eval_split: float
+    """Split ratio for train/eval set"""
     nb_iterations: int
     """Number of iterations"""
     ppo_epochs: int
@@ -68,6 +70,7 @@ class Config(metaclass=Singleton):
         self.len_trajectory = 64
         self.ppo_batch_size = 64
         self.nb_iterations = 10000
+        self.train_eval_split = 0
         self.ppo_epochs = 4
         self.entropy_coef = 0.01
         self.lr = 0.001
@@ -96,6 +99,7 @@ class Config(metaclass=Singleton):
         self.benchmarks_folder_path = config["benchmarks_folder_path"]
         self.len_trajectory = config["len_trajectory"]
         self.ppo_batch_size = config["ppo_batch_size"]
+        self.train_eval_split = config["train_eval_split"]
         self.nb_iterations = config["nb_iterations"]
         self.ppo_epochs = config["ppo_epochs"]
         self.entropy_coef = config["entropy_coef"]
@@ -104,7 +108,9 @@ class Config(metaclass=Singleton):
         self.json_file = config["json_file"]
         self.tags = config["tags"]
         self.logging = config["logging"]
+        
         # Check the configuration values
+        assert self.train_eval_split >= 0 and self.train_eval_split <= 1, "train_eval_split should be between 0 and 1."
         assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
         assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
         assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
@@ -128,6 +134,7 @@ class Config(metaclass=Singleton):
             "benchmarks_folder_path": self.benchmarks_folder_path,
             "len_trajectory": self.len_trajectory,
             "ppo_batch_size": self.ppo_batch_size,
+            "train_eval_split": self.train_eval_split,
             "nb_iterations": self.nb_iterations,
             "ppo_epochs": self.ppo_epochs,
             "entropy_coef": self.entropy_coef,

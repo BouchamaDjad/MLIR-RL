@@ -348,7 +348,7 @@ class HiearchyModel(nn.Module):
         lstm_out, (roots_h_n, roots_c_n) = self.roots_lstm(roots_tensor)
         roots_h_n = roots_h_n.permute(1, 0, 2)
         
-        print('roots_h_n shape:',roots_h_n.shape)
+        # print('roots_h_n shape:',roots_h_n.shape)
         
         x = roots_h_n[0]
         

@@ -382,11 +382,11 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
     # NOTE: Only using one environment
     speedup_values: list[float] = []
     for i, (bench_name, benchmark_data) in enumerate(env.envs[0].benchmarks_data):
-        if cfg.data_format == 'mlir':
-            print(f'Benchmark ({i}):', bench_name)
-        else:
+        if cfg.data_format == 'json' and "bench" not in benchmark_data.bench_name:
             op_tag = benchmark_data.operation_tags[-1]
             print(f'Operation ({i}):', benchmark_data.operations[op_tag].raw_operation)
+        else:
+            print(f'Benchmark ({i}):', bench_name)
 
         # Reset the environement with the specific operation
         state, obs = env.reset(i)
@@ -412,7 +412,7 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
                 print('Speedup:', speedup_metric)
 
                 if neptune_logs is not None:
-                    neptune_logs[f'eval/{final_state.operation_features.raw_operation}_speedup'].append(speedup_metric)
+                    neptune_logs[f'eval/{bench_name}_speedup'].append(speedup_metric)
                     neptune_logs['eval/final_speedup'].append(speedup_metric)
                     speedup_values.append(speedup_metric)
 

@@ -12,12 +12,13 @@
     "benchmarks_folder_path": "",
     "len_trajectory": 64,
     "ppo_batch_size": 64,
+    "train_eval_split": 0.2,
     "nb_iterations": 10000,
     "ppo_epochs": 4,
     "entropy_coef": 0.01,
     "lr": 0.001,
     "truncate": 5,
-    "json_file": "./data/nn/operations-sequence.json",
+    "json_file": "./data/nn/final-operation-sequence-5.json",
     "tags": ["nn"],
     "logging": true
 }

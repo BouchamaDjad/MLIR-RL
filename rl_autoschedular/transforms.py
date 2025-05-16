@@ -531,9 +531,11 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
     code = code.strip()
 
     # Re-extract loop data if it's gonna be needed afterwards
-    if transformation in ['parallelization', 'vectorization']:
-        new_benchmark_features = extract_bench_features_from_code(state.bench_name, code, bench_features.root_exec_time, state.exec_time)
-        operation_features = new_benchmark_features.operations[state.operation_tag]
+    # if transformation in ['parallelization', 'vectorization']:
+    #     new_benchmark_features = extract_bench_features_from_code(state.bench_name, code, bench_features.root_exec_time, state.exec_time)
+    #     operation_features = new_benchmark_features.operations[state.operation_tag]
+
+    operation_features = state.operation_features
 
     if transformation == 'tiling':
         if not parameters:

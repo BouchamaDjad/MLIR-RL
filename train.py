@@ -3,7 +3,11 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # Import modules
-from rl_autoschedular.env import ParallelEnv
+from rl_autoschedular.env import (
+    ParallelEnv,
+    train_eval_split
+)
+                                  
 from rl_autoschedular.model import HiearchyModel as Model
 import torch
 from tqdm import tqdm
@@ -23,16 +27,22 @@ device = torch.device("cpu")
 print_info('Finish imports')
 
 # Set environments
-env = ParallelEnv(
-    num_env=1,
-    reset_repeat=1,
-    step_repeat=1
-)
-eval_env = ParallelEnv(
-    num_env=1,
-    reset_repeat=1,
-    step_repeat=1
-)
+if cfg.data_format == "json" and cfg.train_eval_split:
+    env,eval_env = train_eval_split(eval_size=0.2)
+
+else:
+    env = ParallelEnv(
+        num_env=1,
+        reset_repeat=1,
+        step_repeat=1
+    )
+
+    eval_env = ParallelEnv(
+        num_env=1,
+        reset_repeat=1,
+        step_repeat=1
+    )
+
 print_info('Env build ...')
 # NOTE: using only one environment
 print_info(f'tmp_file = {env.envs[0].tmp_file}')

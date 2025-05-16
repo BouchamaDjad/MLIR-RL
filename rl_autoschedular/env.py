@@ -10,10 +10,8 @@ from typing import Optional, Literal
 from rl_autoschedular import config as cfg
 from rl_autoschedular.state import OperationState, BenchmarkFeatures
 from rl_autoschedular.observation import (
-    __inline,
     extract_bench_features_from_file,
     extract_bench_features_from_code,
-    extract_function,
     extract_op_features_from_affine_code,
     build_op_features_vector,
     build_loop_tree_from_ast
@@ -31,61 +29,43 @@ from rl_autoschedular.evaluation import (
 )
 from utils.log import print_alert, print_info, print_success, print_error
 
-def get_operation_type(raw_operation):
-    operation_type = "unknown"
+def train_eval_split(eval_size: float = 0.2):
+    """Split the json data into two environment sets training and evaluation sets.
+
+    Args:
+        eval_size (float): The proportion of the dataset to include in the evaluation set. Defaults to 0.2.
+
+    Returns:
+        tuple[Env, Env]: The training and evaluation environments.
+    """
+    if cfg.data_format == "mlir":
+        raise ValueError("The data format is not supported for this function. Please use json data format.")
     
-    if 'linalg.matmul' in raw_operation:
-        operation_type = 'matmul'
-    if 'linalg.fill' in raw_operation:
-        operation_type = 'fill'
-    elif 'linalg.conv' in raw_operation and "3d" not in raw_operation and "conv_2d_ngchw_fgchw" not in raw_operation:
-        operation_type = 'conv_2d'
-    elif 'pooling' in raw_operation:
-        operation_type = 'pooling'
-    elif 'linalg.add' in raw_operation:
-        operation_type = 'add'
-    elif 'linalg.generic' in raw_operation:
-        operation_type = 'generic'
-    elif 'func.call' in raw_operation:
-        operation_type = 'func.call'
-
-    return operation_type
-
-import re
-
-def fix(code: str, tmp_file_path) -> str:
-    # if "myFunction" not in code:
-    #     return code
-
-    # code = code.replace("func.func private @myFunction", "func.func @myFunction")
+    with open(cfg.json_file, "r") as file:
+        json_data = json.load(file)
     
-    # main,_ = extract_function(code, "main")
-    
-    # code = __inline(code, tmp_file_path)
+    json_data = list(json_data.items())
 
-    _, (start, _) = extract_function(code, "main")
+    # Split the benchmarks data into training and evaluation sets
+    split_index = int(len(json_data) * (1 - eval_size))
+    random.shuffle(json_data)
+    env_json_data, eval_env_json_data = json_data[:split_index], json_data[split_index:]
 
-    # "\n".join((code.splitlines()[:start] + main.splitlines()))
+    env = ParallelEnv(
+        env_json_data = env_json_data,
+        num_env=1,
+        reset_repeat=1,
+        step_repeat=1
+    )
 
-    for line in code.splitlines():
-        if 'func.func @matmul' in line:
-            find = re.search(r"(tensor<\d+x[\d+x]*f32>)",line)
-            if find is not None:
-                shape = find.group(0)
-            break
+    eval_env = ParallelEnv(
+        env_json_data = eval_env_json_data,
+        num_env=1,
+        reset_repeat=1,
+        step_repeat=1
+    )
 
-    code = '\n'.join(code.splitlines()[:start] + """func.func @main(){
-    %c1 = arith.constant 1: index
-    %c0 = arith.constant 0 : index
-    %n = arith.constant 2: index
-    scf.for %i = %c0 to %n step %c1 {
-    %outputmain = func.call @matmul() : () -> SHAPE
-    }
-    return
-}
-}""".replace('SHAPE',shape).splitlines())
-
-    return code
+    return env, eval_env
 
 class Env:
     """Environment for training the reinforcement learning agent."""
@@ -101,13 +81,14 @@ class Env:
     tmp_file: str
     """The temporary file to store the intermediate representations."""
 
-    def __init__(self, reset_repeat: int = 1, step_repeat: int = 1, tmp_file: Optional[str] = None):
+    def __init__(self, reset_repeat: int = 1, step_repeat: int = 1, tmp_file: Optional[str] = None, env_json_data: Optional[list[tuple[str, dict]]] = None):
         """Initialize the environment.
 
         Args:
             reset_repeat (int): The number of times to repeat the reset function. Defaults to 1.
             step_repeat (int): The number of times to repeat the step function. Defaults to 1.
             tmp_file (Optional[str]): The temporary file to store the intermediate representations. Defaults to None.
+            env_json_data (Optional[list[tuple[str, dict]]]): The json data to use for the environment. Defaults to None.
         """
         # Generate a random file to be used in order to apply the transformations and evaluate the code
         # This is done in order to enable having multiple experiments at the same time, by letting each
@@ -118,6 +99,11 @@ class Env:
         with open(tmp_file, "w") as file:
             file.write("")
         self.tmp_file = tmp_file
+
+        self.skipped_operations = [
+            "unknown", 
+            "linalg.fill"
+        ]
 
         # Get benchmarks data
         self.benchmarks_data = []
@@ -132,34 +118,58 @@ class Env:
                 self.benchmarks_data.append((bench_name, benchmark_data))
         else:
             # Load operations data from json file
-            with open(cfg.json_file, "r") as file:
-                json_data = json.load(file)
+            if env_json_data is None:
+                with open(cfg.json_file, "r") as file:
+                    json_data = json.load(file)
+            else:
+                json_data = {op: detail for op, detail in env_json_data}
+
             operation_filter = [
                 'linalg.matmul',
                 'linalg.conv_2d',
                 'pooling',
                 'generic',
                 'linalg.add',
-                "func.call"
+                "func.call",
+                'bench'
             ]
-            json_data = {op: details for op, details in json_data.items() if any([s in op for s in operation_filter])}
-            json_data = [(details['operation'], details) for _, details in json_data.items()]
+
+            json_data = [(op, details) for op, details in json_data.items() if any([s in op for s in operation_filter])]
+            # json_data = [(details['operation'], details) for _, details in json_data.items()]
+
 
             # Get the AST of the MLIR code and give a tag to each linalg operation
-            # The last operation represents the operations that we want to optimize (the first operations are just linalg.fills)
             for i in tqdm(range(len(json_data))):
                 # Get full MLIR code and execution time
                 code = json_data[i][1]["transform_wrapped_operation"]
-                code = fix(code,self.tmp_file)
-                # code = extract_function(code)
                 exec_time = json_data[i][1]["execution_time"]
                 # Build benchmark features
-                bench_name = f"bench_{i}"
+                bench_name = json_data[i][0]
                 benchmark_data = extract_bench_features_from_code(bench_name, code, exec_time, exec_time)
                 self.benchmarks_data.append((bench_name, benchmark_data))
 
         self.reset_repeat = reset_repeat
         self.step_repeat = step_repeat
+
+    def get_operation_type(self,raw_operation):
+        operation_type = "unknown"
+        
+        if 'linalg.matmul' in raw_operation:
+            operation_type = 'matmul'
+        elif 'linalg.conv' in raw_operation and "3d" not in raw_operation and "conv_2d_ngchw_fgchw" not in raw_operation:
+            operation_type = 'conv_2d'
+        elif 'pooling' in raw_operation:
+            operation_type = 'pooling'
+        elif 'linalg.add' in raw_operation:
+            operation_type = 'add'
+        elif 'linalg.generic' in raw_operation:
+            operation_type = 'generic'
+        elif 'func.call' in raw_operation:
+            operation_type = 'func.call'
+        elif 'linalg.fill' in raw_operation:
+            operation_type = 'linalg.fill'
+
+        return operation_type
 
     def reset(self, idx: Optional[int] = None):
         """Reset the environment.
@@ -189,24 +199,18 @@ class Env:
         # TODO: Add case where data_format is "json" and reload data from json file if needed (if optimization mode is "all")
 
         # Get the last operation
-        # operation_index = len(benchmark_data.operation_tags) - 1
-        # operation_tag = benchmark_data.operation_tags[-1]
-        # operation_features = benchmark_data.operations[operation_tag]
-        # num_loops = len(operation_features.nested_loops)
-        
-        # Get the first operation that's a non fill operation
         operation_index = 0
         operation_tag = benchmark_data.operation_tags[0]
         operation_features = benchmark_data.operations[operation_tag]
         num_loops = len(operation_features.nested_loops)
-        
 
         # Get operation type
         raw_operation = operation_features.raw_operation
-        operation_type = get_operation_type(raw_operation)
+        operation_type = self.get_operation_type(raw_operation)
 
         # Skip unknown operations or those with no loops
-        while operation_index < len(benchmark_data.operation_tags) and ( operation_type == "unknown" or operation_type =='fill' or len(operation_features.nested_loops) == 0):
+        while operation_index < len(benchmark_data.operation_tags) -1 and \
+            ( operation_type in self.skipped_operations or len(operation_features.nested_loops) == 0):
             print_alert(f"skipping: {raw_operation}")
 
             operation_index = operation_index + 1
@@ -215,7 +219,7 @@ class Env:
             num_loops = len(operation_features.nested_loops)
 
             raw_operation = operation_features.raw_operation
-            operation_type = get_operation_type(raw_operation)
+            operation_type = self.get_operation_type(raw_operation)
 
         # Action mask:
         # Transformations: 5 = TP, T, Interchange, Im2col, Vectorization
@@ -360,11 +364,15 @@ class Env:
 
                         state.current_consumer += 1
                         state.consumer_tag = state.operation_features.consumers[state.current_consumer]
-                        state.consumer_features = batch_data.operations[state.consumer_tag]
+                        state.consumer_features = bench_data.operations[state.consumer_tag]
 
 
                     else:
                         state.consumer_tag == None
+            
+            # TODO: maybe create a new set for tiled ops
+            elif transformed_code and transformation == "tiling":
+                state.fused_ops.update([state.operation_tag])
             
 
         else:  # transformation == 'no_transformation' or 'vectorization'
@@ -424,10 +432,10 @@ class Env:
                 )
                 
             # if we vectorise an operation check if fill op exist in its producers, if yes fuse them and vectorise
-            if transformation == 'vectorization'
+            if transformation == 'vectorization':
                for producer_tag in state.operation_features.producers:
                    prod_features = bench_data.operations[producer_tag]
-                   op_type = get_operation_type(prod_features.raw_operation)
+                   op_type = self.get_operation_type(prod_features.raw_operation)
                    
                    if op_type == 'fill':
                        new_code = transform_dialect_fuse_only(transformed_code, state.operation_tag, producer_tag, state.tmp_file)
@@ -444,8 +452,6 @@ class Env:
         if trans_failed:
             # We keep the same code as previously
             # We get a penalty of -5
-            if transformation in ['fusion', 'parallelization', 'img2col']:
-                print("",end="")
             print_error(f'FAILED TRANSFORM: {transformation} {parameters} {state.transformation_history}')
             # This will create the file if it doesn't exist, or overwrite it if it does
             with open(f'./errors_files/{self.bench_index}_{state.operation_tag}.mlir', 'w') as f:
@@ -455,17 +461,20 @@ class Env:
             reward -= 5        
         
         if transformation not in ['no_transformation', 'vectorization'] and state.step_count < cfg.truncate and \
-            not state.operation_type == "unknown":
+            not state.operation_type in self.skipped_operations:
 
             # Update state actions:
             next_state_actions = self.update_action_history(state, transformation, parameters)
 
             # Update action mask:
             new_actions_mask = self.update_action_mask(state, transformation, num_loops)
-            
+
+            #TODO: Better to be put it in the update_action_mask function            
             if transformation == 'fusion':
                 # change the mask to only allow vectorisation in the next step
-                new_actions_mask = [True if i == 4 else False if i < 10 else new_actions_mask[i] for i in range(len(cfg.num_transformations))]
+                vectorization_index = 4
+                new_actions_mask[:cfg.num_transformations] = [False, False, False, False, False, False, False]
+                new_actions_mask[vectorization_index] = True
             
             next_state = OperationState(
                 bench_name=state.bench_name,
@@ -489,27 +498,9 @@ class Env:
             )
         else:
             # Switch to the Next operation
-            if state.operation_index > 0:
+            if state.operation_index < len(bench_data.operation_tags) - 1:
                 
-            # Execute and evaluate the code
-                if cfg.use_bindings:
-                    new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
-                else:
-                    new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
-                # Print infos and update reward
-                if new_exec_time is None:
-                    reward -= 20
-                    print_error(f"EXECUTION ERROR: {transformation} {parameters} {state.transformation_history}")
-                    new_exec_time = state.exec_time
-                else:
-                    if bench_passed:
-                        # We calculate the speedup
-                        reward += self.speedup_reward(new_exec_time, state.root_exec_time)
-                    else:
-                        reward -= 20
-                        print_error("ASSERTION FAILED")
-                        new_exec_time = state.exec_time
-                
+                reward, new_exec_time = self.evaluate_step(transformed_code, state, transformation, parameters, reward)                
 
                 speedup_metric = state.exec_time / new_exec_time
                 print('-' * 30)
@@ -528,12 +519,12 @@ class Env:
                 # self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
 
                 # Build a new state that points to the next operation
-                new_op_tag = bench_data.operation_tags[state.operation_index - 1]
+                new_op_tag = bench_data.operation_tags[state.operation_index + 1]
                 new_op_features = bench_data.operations[new_op_tag]
                 
-                operation_index = state.operation_index - 1
+                operation_index = state.operation_index + 1
                 raw_operation = new_op_features.raw_operation
-                new_operation_type = get_operation_type(raw_operation)
+                new_operation_type = self.get_operation_type(raw_operation)
                 
                 if len(new_op_features.producers) != 0:
                     consumer_tag = new_op_features.producers[0]
@@ -545,26 +536,26 @@ class Env:
                 
                 # Skip unknown operations or those with no loops
                 # TODO: figure out what to do with the case where index 0 is unknown
-                while operation_index >= 1 and ( new_operation_type == "unknown" or len(new_op_features.nested_loops) == 0):
+                while operation_index < len(bench_data.operation_tags) - 1 and \
+                    ( new_operation_type in self.skipped_operations or len(new_op_features.nested_loops) == 0):
+
                     print_alert(f"skipping: {raw_operation}")
 
-                    operation_index = operation_index - 1
+                    operation_index = operation_index + 1
                     new_op_tag = bench_data.operation_tags[operation_index]
                     new_op_features = bench_data.operations[new_op_tag]
 
                     raw_operation = new_op_features.raw_operation
-                    new_operation_type = get_operation_type(raw_operation)
+                    new_operation_type = self.get_operation_type(raw_operation)
 
-                if new_operation_type != "unknown" and len(new_op_features.nested_loops) != 0:
-                    
-                    
+                if new_operation_type not in self.skipped_operations and len(new_op_features.nested_loops) != 0:
+
                     # TODO: create an action mask where only vect is open for the case where we fused the next operation
-                    
                     actions_mask = self.initialize_action_mask(len(new_op_features.nested_loops), new_operation_type)
                     
                     if new_op_tag in state.fused_ops:
                         # set vectorisation to true, all else false
-                        action_mask = [True if i == 4 else False if i < 10 else action_mask[i] for i in range(len(cfg.num_transformations))]
+                        actions_mask[:cfg.num_transformations] = [False, False, False, False, True, False, False]
 
                     next_state = OperationState(
                         bench_name=bench_name,
@@ -598,33 +589,15 @@ class Env:
         #   We have optimized all the operation and we have Vectorization indicating the end of the schedule
         #   Error occured in the transformation
         done = (trans_failed) or \
-            (next_state.operation_type == "unknown") or \
-            (next_state.operation_index == 0 and (
+            (next_state.operation_type in self.skipped_operations) or \
+            (next_state.operation_index == len(bench_data.operation_tags) - 1 and (
                     transformation in ['no_transformation', 'vectorization'] or \
                     next_state.step_count >= cfg.truncate
                 )
             )
 
         if done:
-            # Execute and evaluate the code
-            if cfg.use_bindings:
-                new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
-            else:
-                new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
-            # Print infos and update reward
-            if new_exec_time is None:
-                reward -= 20
-                print_error(f"EXECUTION ERROR: {transformation} {parameters} {next_state.transformation_history}")
-                new_exec_time = next_state.exec_time
-            else:
-                if bench_passed:
-                    # We calculate the speedup
-                    reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
-                    next_state.exec_time = new_exec_time
-                else:
-                    reward -= 20
-                    print_error("ASSERTION FAILED")
-                    new_exec_time = next_state.exec_time
+            reward, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
 
         next_state.cummulative_reward += reward
 
@@ -639,6 +612,29 @@ class Env:
             next_state, next_obs = self.reset()
 
         return next_obs, reward, done, next_state, final_state
+
+    def evaluate_step(self, transformed_code, next_state, transformation, parameters, reward=0):
+        # Execute and evaluate the code
+        if cfg.use_bindings:
+            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
+        else:
+            new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
+        # Print infos and update reward
+        if new_exec_time is None:
+            reward -= 20
+            print_error(f"EXECUTION ERROR: {transformation} {parameters} {next_state.transformation_history}")
+            new_exec_time = next_state.exec_time
+        else:
+            if bench_passed:
+                # We calculate the speedup
+                reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
+                next_state.exec_time = new_exec_time
+            else:
+                reward -= 20
+                print_error("ASSERTION FAILED")
+                new_exec_time = next_state.exec_time
+
+        return reward, new_exec_time
 
     def get_obs_old(self, state: OperationState):
         """Build the obervation vector for the input state.
@@ -754,7 +750,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [False, True, True, False, True, False, True]
+            action_mask[:TP_BEGIN] = [False, True, True, True, False, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -891,7 +887,7 @@ class Env:
         interchanges = []
         for c in [1, 2, 3]:
             level_interchanges = []
-            for _ in range(cfg.max_num_loops - c):
+            for _ in range(max(cfg.max_num_loops,num_loops) - c):
                 level_interchanges.append(tuple(range(num_loops)))
             for i in range(num_loops - c):
                 params = list(range(num_loops))
@@ -1075,20 +1071,22 @@ class ParallelEnv:
     envs: list[Env]
     """list of environments."""
 
-    def __init__(self, num_env: int = 1, reset_repeat: int = 1, step_repeat: int = 1):
+    def __init__(self, num_env: int = 1, reset_repeat: int = 1, step_repeat: int = 1, env_json_data: list[tuple[str, dict]] = None):
         """Initialize parallel environments.
 
         Args:
             num_env (int): number of environments. Defaults to 1.
             reset_repeat (int): The number of times to repeat the reset function. Defaults to 1.
             step_repeat (int): The number of times to repeat the step function. Defaults to 1.
+            env_json_data (list[tuple[str, dict]]): The json data for the environments. Defaults to None.
         """
         self.num_env = num_env
         self.envs = [
             Env(
+                env_json_data=env_json_data,
                 reset_repeat=reset_repeat,
                 step_repeat=step_repeat
-            ) for i in range(num_env)
+            ) for _ in range(num_env)
         ]
 
     def reset(self, idx: Optional[int] = None):

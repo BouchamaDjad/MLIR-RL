@@ -81,12 +81,12 @@ class OperationState:
     """The type of the operation (generic, matmul, conv2d, ...)."""
     operation_features: OperationFeatures
     """Features of the operation."""
-    current_producer: int
-    "index of the current producer"
-    producer_tag: str
-    "tag of the producer operation"
-    producer_features: OperationFeatures
-    "Features of the producer operation"
+    current_consumer: int
+    "index of the current consumer"
+    consumer_tag: str
+    "tag of the consumer operation"
+    consumer_features: OperationFeatures
+    "Features of the consumer operation"
     fused_ops: set
     "fused ops"
     transformed_code: str

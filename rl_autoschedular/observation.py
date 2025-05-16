@@ -491,7 +491,8 @@ def extract_op_features_from_affine_code(raw_operation: str, tmp_file_path: str,
         load_data=load_data,
         store_data=store_data,
         nested_loops=nested_loops,
-        producers=[]
+        producers=[],
+        consumers=[]
     )
 
 

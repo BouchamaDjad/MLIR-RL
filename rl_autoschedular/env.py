@@ -21,7 +21,9 @@ from rl_autoschedular.observation import (
 from rl_autoschedular.transforms import (
     apply_transformation_with_timeout,
     get_ops_by_tags,
-    apply_conv2d_decomposition
+    apply_conv2d_decomposition,
+    transform_dialect_fuse_only,
+    transform_dialect_vectorise_with_vectorizer
 )
 from rl_autoschedular.evaluation import (
     evaluate_code_with_bindings_and_timeout,
@@ -34,6 +36,8 @@ def get_operation_type(raw_operation):
     
     if 'linalg.matmul' in raw_operation:
         operation_type = 'matmul'
+    if 'linalg.fill' in raw_operation:
+        operation_type = 'fill'
     elif 'linalg.conv' in raw_operation and "3d" not in raw_operation and "conv_2d_ngchw_fgchw" not in raw_operation:
         operation_type = 'conv_2d'
     elif 'pooling' in raw_operation:
@@ -185,20 +189,27 @@ class Env:
         # TODO: Add case where data_format is "json" and reload data from json file if needed (if optimization mode is "all")
 
         # Get the last operation
-        operation_index = len(benchmark_data.operation_tags) - 1
-        operation_tag = benchmark_data.operation_tags[-1]
+        # operation_index = len(benchmark_data.operation_tags) - 1
+        # operation_tag = benchmark_data.operation_tags[-1]
+        # operation_features = benchmark_data.operations[operation_tag]
+        # num_loops = len(operation_features.nested_loops)
+        
+        # Get the first operation that's a non fill operation
+        operation_index = 0
+        operation_tag = benchmark_data.operation_tags[0]
         operation_features = benchmark_data.operations[operation_tag]
         num_loops = len(operation_features.nested_loops)
+        
 
         # Get operation type
         raw_operation = operation_features.raw_operation
         operation_type = get_operation_type(raw_operation)
 
         # Skip unknown operations or those with no loops
-        while operation_index >= 1 and ( operation_type == "unknown" or len(operation_features.nested_loops) == 0):
+        while operation_index < len(benchmark_data.operation_tags) and ( operation_type == "unknown" or operation_type =='fill' or len(operation_features.nested_loops) == 0):
             print_alert(f"skipping: {raw_operation}")
 
-            operation_index = operation_index - 1
+            operation_index = operation_index + 1
             operation_tag = benchmark_data.operation_tags[operation_index]
             operation_features = benchmark_data.operations[operation_tag]
             num_loops = len(operation_features.nested_loops)
@@ -224,12 +235,12 @@ class Env:
         # 3 because we have 3 transformations that require parameters: TP, T, I
         actions = np.zeros((cfg.max_num_loops, 4, cfg.truncate,))
 
-        if len(operation_features.producers) != 0:
-            producer_tag = operation_features.producers[0]
-            producer_features = benchmark_data.operations[producer_tag]
+        if len(operation_features.consumers) != 0:
+            consumer_tag = operation_features.consumers[0]
+            consumer_features = benchmark_data.operations[consumer_tag]
         else:
-            producer_tag = None
-            producer_features = None
+            consumer_tag = None
+            consumer_features = None
             
         state = OperationState(
             bench_name=bench_name,
@@ -237,9 +248,9 @@ class Env:
             operation_index =operation_index,
             operation_type=operation_type,
             operation_features=operation_features,
-            current_producer = 0,
-            producer_tag = producer_tag,
-            producer_features = producer_features,
+            current_consumer = 0,
+            consumer_tag = consumer_tag,
+            consumer_features = consumer_features,
             fused_ops = set(),
             transformed_code=benchmark_data.code,
             actions=actions,
@@ -321,9 +332,9 @@ class Env:
                     operation_index=state.operation_index,
                     operation_type='conv_2d+img2col',  # The operation type changes
                     operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
-                    current_producer = 0,
-                    producer_tag = state.producer_tag,
-                    producer_features = state.producer_features,
+                    current_consumer = 0,
+                    consumer_tag = state.consumer_tag,
+                    consumer_features = state.consumer_features,
                     fused_ops = state.fused_ops,
                     transformed_code=state.transformed_code,
                     actions=state.actions,
@@ -336,18 +347,24 @@ class Env:
                     tmp_file=self.tmp_file
                 )
 
-            elif transformed_code and transformation == "fusion":
+            elif transformed_code and (transformation == "fusion" or transformation == 'parallelization'):
 
                 # TODO: Look into rebuilding the operation features
                 
-                if state.producer_features is not None and (state.current_producer + 1) < len(state.producer_features.producers):
-                    state.current_producer += 1
-                    state.producer_tag = state.producer_features.producers[state.current_producer]
-                    state.producer_features = self.benchmarks_data[self.bench_index][1].operations[state.producer_tag]
-                    state.fused_ops.update([state.operation_tag, state.producer_tag])
-                    
-                else:
-                    state.producer_tag == None
+                # add the fused ops into the set
+                state.fused_ops.update([state.operation_tag, state.consumer_tag])
+                
+                # if the there is still consumers to fuse update the consumer information in the state
+                if transformation =='fusion':
+                    if state.consumer_features is not None and (state.current_consumer + 1) < len(state.operation_features.consumers):
+
+                        state.current_consumer += 1
+                        state.consumer_tag = state.operation_features.consumers[state.current_consumer]
+                        state.consumer_features = batch_data.operations[state.consumer_tag]
+
+
+                    else:
+                        state.consumer_tag == None
             
 
         else:  # transformation == 'no_transformation' or 'vectorization'
@@ -405,7 +422,24 @@ class Env:
                     timeout=20,
                     use_vectorizer=cfg.use_vectorizer
                 )
-
+                
+            # if we vectorise an operation check if fill op exist in its producers, if yes fuse them and vectorise
+            if transformation == 'vectorisation'
+               for producer_tag in state.operation_features.producers:
+                   prod_features = bench_data.operations[producer_tag]
+                   op_type = get_operation_type(prod_features.raw_operation)
+                   
+                   if op_type == 'fill':
+                       new_code = transform_dialect_fuse_only(transformed_code, state.operation_tag, producer_tag, state.tmp_file)
+                       
+                       if new_code:
+                           # if fusion succesful apply vectorisation
+                           new_code = transform_dialect_vectorise_with_vectorizer(new_code, producer_tag, state.tmp_file)
+                           
+                           if new_code:
+                               # both fusion and vect are successful update the code
+                               transformed_code = new_code
+                                                      
         trans_failed = not transformed_code  # This indicates that the transformation failed or timed out
         if trans_failed:
             # We keep the same code as previously
@@ -435,9 +469,9 @@ class Env:
                 operation_index=state.operation_index,
                 operation_type=state.operation_type,
                 operation_features=state.operation_features,
-                current_producer = state.current_producer,
-                producer_tag = state.producer_tag,
-                producer_features = state.producer_features,
+                current_consumer = state.current_consumer,
+                consumer_tag = state.consumer_tag,
+                consumer_features = state.consumer_features,
                 fused_ops = state.fused_ops,
                 transformed_code=transformed_code,  # New transformed code
                 actions=next_state_actions,  # New actions
@@ -498,12 +532,12 @@ class Env:
                 new_operation_type = get_operation_type(raw_operation)
                 
                 if len(new_op_features.producers) != 0:
-                    producer_tag = new_op_features.producers[0]
-                    producer_features = self.benchmarks_data[self.bench_index][1].operations[producer_tag]
+                    consumer_tag = new_op_features.producers[0]
+                    consumer_features = self.benchmarks_data[self.bench_index][1].operations[consumer_tag]
                     
                 else:
-                    producer_tag = None
-                    producer_features = None
+                    consumer_tag = None
+                    consumer_features = None
                 
                 # Skip unknown operations or those with no loops
                 # TODO: figure out what to do with the case where index 0 is unknown
@@ -517,19 +551,26 @@ class Env:
                     raw_operation = new_op_features.raw_operation
                     new_operation_type = get_operation_type(raw_operation)
 
-                if new_operation_type != "unknown" and len(new_op_features.nested_loops) != 0:                               
-
+                if new_operation_type != "unknown" and len(new_op_features.nested_loops) != 0:
+                    
+                    
+                    # TODO: create an action mask where only vect is open for the case where we fused the next operation
+                    
                     actions_mask = self.initialize_action_mask(len(new_op_features.nested_loops), new_operation_type)
                     
+                    if new_op_tag in state.fused_ops:
+                        # set vectorisation to true, all else false
+                        action_mask = [True if i == 4 else False if i < 10 else action_mask[i] for i in range(len(cfg.num_transformations))]
+
                     next_state = OperationState(
                         bench_name=bench_name,
                         operation_tag=new_op_tag,
                         operation_index=operation_index,
                         operation_type=new_operation_type,
                         operation_features=new_op_features,
-                        current_producer = 0,
-                        producer_tag = producer_tag,
-                        producer_features = producer_features,
+                        current_consumer = 0,
+                        consumer_tag = consumer_tag,
+                        consumer_features = consumer_features,
                         fused_ops = state.fused_ops,
                         transformed_code=transformed_code,
                         actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
@@ -664,9 +705,9 @@ class Env:
         # ))
         curr_tree = build_loop_tree_from_ast(state.operation_features.nested_loops, op_features_vector)
         
-        if state.producer_tag != None:
-            prod_features_vector = build_op_features_vector(state.producer_features)
-            prod_tree = build_loop_tree_from_ast(state.producer_features.nested_loops,prod_features_vector)
+        if state.consumer_tag != None:
+            prod_features_vector = build_op_features_vector(state.consumer_features)
+            prod_tree = build_loop_tree_from_ast(state.consumer_features.nested_loops,prod_features_vector)
         else:
             
             prod_tree = None

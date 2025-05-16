@@ -48,6 +48,8 @@ class OperationFeatures:
     """List of nested loops where each loop is represented by the NestedLoopFeatures dataclass."""
     producers: list[str]
     """List of producers for an operation"""
+    consumers: list[str]
+    """List of consumers for an operation"""
 
 
 @dataclass

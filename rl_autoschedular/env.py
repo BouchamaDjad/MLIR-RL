@@ -589,7 +589,7 @@ class Env:
                         actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
                         actions_mask=actions_mask,
                         step_count=0,
-                        exec_time=state.exec_time,
+                        exec_time=new_exec_time,
                         root_exec_time=state.root_exec_time,
                         transformation_history=[],
                         cummulative_reward=state.cummulative_reward,
@@ -618,7 +618,8 @@ class Env:
             )
 
         if done:
-            reward, _, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
+            reward, new_exec_time, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
+            next_state.exec_time = new_exec_time
 
         next_state.cummulative_reward += reward
 

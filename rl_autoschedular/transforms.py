@@ -553,12 +553,13 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
         new_code = transform_dialect_img2col(code, state.operation_tag, tmp_file)
     elif transformation == 'vectorization':
         # If the operation isn't small enough for vectorization, ignore the transformation
-        op_iter_space = 1
-        for nested_loop in operation_features.nested_loops:
-            op_iter_space *= nested_loop.upper_bound
-        if op_iter_space > cfg.vect_size_limit:
-            print_alert(f"REASON: Too large to vectorize {op_iter_space} > {cfg.vect_size_limit}")
-            return ''
+        if cfg.vect_size_limit > 0:
+            op_iter_space = 1
+            for nested_loop in operation_features.nested_loops:
+                op_iter_space *= nested_loop.upper_bound
+            if op_iter_space > cfg.vect_size_limit:
+                print_alert(f"REASON: Too large to vectorize {op_iter_space} > {cfg.vect_size_limit}")
+                return ''
 
         if use_vectorizer:
             new_code = transform_dialect_vectorise_with_vectorizer(code, state.operation_tag, tmp_file)
@@ -712,8 +713,9 @@ def get_ops_by_tags(code: str, operation_tags: list, tmp_file_path: str):
     with open(tmp_file_path, "w") as file:
         file.write(code)
 
+    # FIX: This is a temporary fix to avoid the img2col error
     result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule -o {tmp_file_path}",
+        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule -o {tmp_file_path}.out",
     ).read()
 
     lines = result.split('\n')

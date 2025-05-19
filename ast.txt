@@ -1,10 +1,8 @@
 #START_OPERATION
-%1 = linalg.fill {tag = "operation_0"} ins(%cst : f32) outs(%0 : tensor<256x228x112x288xf32>) -> tensor<256x228x112x288xf32>
+%1 = linalg.fill {tag = "operation_0"} ins(%cst : f32) outs(%0 : tensor<512x256xf32>) -> tensor<512x256xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 228 1 parallel
-d2 0 112 1 parallel
-d3 0 288 1 parallel
+d0 0 512 1 parallel
+d1 0 256 1 parallel
 #START_LOAD_DATA
 #START_OP_COUNT
 + 0
@@ -22,10 +20,10 @@ operation_0
 
 
 #START_OPERATION
-%3 = linalg.fill {tag = "operation_1"} ins(%cst : f32) outs(%2 : tensor<3x3xf32>) -> tensor<3x3xf32>
+%3 = linalg.fill {tag = "operation_1"} ins(%cst : f32) outs(%2 : tensor<256x512xf32>) -> tensor<256x512xf32>
 #START_NESTED_LOOPS
-d0 0 3 1 parallel
-d1 0 3 1 parallel
+d0 0 256 1 parallel
+d1 0 512 1 parallel
 #START_LOAD_DATA
 #START_OP_COUNT
 + 0
@@ -43,12 +41,10 @@ operation_1
 
 
 #START_OPERATION
-%5 = linalg.fill {tag = "operation_2"} ins(%cst : f32) outs(%4 : tensor<256x226x110x288xf32>) -> tensor<256x226x110x288xf32>
+%5 = linalg.fill {tag = "operation_2"} ins(%cst : f32) outs(%4 : tensor<512x512xf32>) -> tensor<512x512xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 226 1 parallel
-d2 0 110 1 parallel
-d3 0 288 1 parallel
+d0 0 512 1 parallel
+d1 0 512 1 parallel
 #START_LOAD_DATA
 #START_OP_COUNT
 + 0
@@ -66,21 +62,19 @@ operation_2
 
 
 #START_OPERATION
-%7 = linalg.pooling_nhwc_min {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>, tag = "operation_3"} ins(%1, %3 : tensor<256x228x112x288xf32>, tensor<3x3xf32>) outs(%5 : tensor<256x226x110x288xf32>) -> tensor<256x226x110x288xf32>
+%7 = linalg.matmul {tag = "operation_3"} ins(%1, %3 : tensor<512x256xf32>, tensor<256x512xf32>) outs(%5 : tensor<512x512xf32>) -> tensor<512x512xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 226 1 parallel
-d2 0 110 1 parallel
-d3 0 288 1 parallel
-d4 0 3 1 reduction
-d5 0 3 1 reduction
+d0 0 512 1 parallel
+d1 0 512 1 parallel
+d2 0 256 1 reduction
 #START_LOAD_DATA
-d0, d1 + d4, d2 + d5, d3
-d0, d1, d2, d3
+d0, d2
+d2, d1
+d0, d1
 #START_OP_COUNT
-+ 0
++ 1
 - 0
-* 0
+* 1
 / 0
 exp 0
 #START_TAG
@@ -93,21 +87,19 @@ operation_3
 
 
 #START_OPERATION
-%10 = linalg.pooling_nhwc_min {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>, tag = "operation_4"} ins(%7, %8 : tensor<256x226x110x288xf32>, tensor<1x1xf32>) outs(%9 : tensor<256x113x55x288xf32>) -> tensor<256x113x55x288xf32>
+%10 = linalg.matmul {tag = "operation_4"} ins(%7, %8 : tensor<512x512xf32>, tensor<512x1024xf32>) outs(%9 : tensor<512x1024xf32>) -> tensor<512x1024xf32>
 #START_NESTED_LOOPS
-d0 0 256 1 parallel
-d1 0 113 1 parallel
-d2 0 55 1 parallel
-d3 0 288 1 parallel
-d4 0 1 1 reduction
-d5 0 1 1 reduction
+d0 0 512 1 parallel
+d1 0 1024 1 parallel
+d2 0 512 1 reduction
 #START_LOAD_DATA
-d0, d1 * 2 + d4, d2 * 2 + d5, d3
-d0, d1, d2, d3
+d0, d2
+d2, d1
+d0, d1
 #START_OP_COUNT
-+ 0
++ 1
 - 0
-* 0
+* 1
 / 0
 exp 0
 #START_TAG
@@ -120,25 +112,73 @@ operation_4
 
 
 #START_OPERATION
-%21 = linalg.pooling_nhwc_max {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>, tag = "operation_5"} ins(%extracted_slice, %11 : tensor<64x7x7x16xf32>, tensor<7x7xf32>) outs(%extracted_slice_0 : tensor<64x1x1x16xf32>) -> tensor<64x1x1x16xf32>
+%13 = linalg.matmul {tag = "operation_5"} ins(%10, %11 : tensor<512x1024xf32>, tensor<1024x256xf32>) outs(%12 : tensor<512x256xf32>) -> tensor<512x256xf32>
 #START_NESTED_LOOPS
-d0 0 64 1 parallel
-d1 0 1 1 parallel
-d2 0 1 1 parallel
-d3 0 16 1 parallel
-d4 0 7 1 reduction
-d5 0 7 1 reduction
+d0 0 512 1 parallel
+d1 0 256 1 parallel
+d2 0 1024 1 reduction
 #START_LOAD_DATA
-d0, d1 * 2 + d4, d2 * 2 + d5, d3
-d0, d1, d2, d3
+d0, d2
+d2, d1
+d0, d1
 #START_OP_COUNT
-+ 0
++ 1
 - 0
-* 0
+* 1
 / 0
 exp 0
 #START_TAG
 operation_5
+#END_OPERATION
+
+
+
+
+
+
+#START_OPERATION
+%16 = linalg.matmul {tag = "operation_6"} ins(%13, %14 : tensor<512x256xf32>, tensor<256x128xf32>) outs(%15 : tensor<512x128xf32>) -> tensor<512x128xf32>
+#START_NESTED_LOOPS
+d0 0 512 1 parallel
+d1 0 128 1 parallel
+d2 0 256 1 reduction
+#START_LOAD_DATA
+d0, d2
+d2, d1
+d0, d1
+#START_OP_COUNT
++ 1
+- 0
+* 1
+/ 0
+exp 0
+#START_TAG
+operation_6
+#END_OPERATION
+
+
+
+
+
+
+#START_OPERATION
+%19 = linalg.matmul {tag = "operation_7"} ins(%16, %17 : tensor<512x128xf32>, tensor<128x512xf32>) outs(%18 : tensor<512x512xf32>) -> tensor<512x512xf32>
+#START_NESTED_LOOPS
+d0 0 512 1 parallel
+d1 0 512 1 parallel
+d2 0 128 1 reduction
+#START_LOAD_DATA
+d0, d2
+d2, d1
+d0, d1
+#START_OP_COUNT
++ 1
+- 0
+* 1
+/ 0
+exp 0
+#START_TAG
+operation_7
 #END_OPERATION
 
 
@@ -156,68 +196,51 @@ operation_0 --> operation_3
 operation_1 --> operation_3
 operation_2 --> operation_3
 operation_3 --> operation_4
+operation_4 --> operation_5
+operation_5 --> operation_6
+operation_6 --> operation_7
 #END_GRAPH
 ########################################
-#map = affine_map<(d0) -> (d0 * 2)>
 module attributes {torch.debug_module_name = "Net"} {
   func.func private @nanoTime() -> i64 attributes {llvm.emit_c_interface}
   func.func private @printFlops(f64)
   func.func private @printI64(i64)
   func.func private @printNewline()
   func.func private @printMemrefF32(tensor<*xf32>)
-  func.func @matmul() -> tensor<256x54x25x288xf32> {
-    %c16 = arith.constant 16 : index
-    %c288 = arith.constant 288 : index
-    %c25 = arith.constant 25 : index
-    %c1 = arith.constant 1 : index
-    %c54 = arith.constant 54 : index
-    %c64 = arith.constant 64 : index
-    %c256 = arith.constant 256 : index
-    %c0 = arith.constant 0 : index
+  func.func @matmul() -> tensor<512x512xf32> {
     %cst = arith.constant 2.000000e+00 : f32
-    %0 = bufferization.alloc_tensor() : tensor<256x228x112x288xf32>
-    %1 = linalg.fill {tag = "operation_0"} ins(%cst : f32) outs(%0 : tensor<256x228x112x288xf32>) -> tensor<256x228x112x288xf32>
-    %2 = bufferization.alloc_tensor() : tensor<3x3xf32>
-    %3 = linalg.fill {tag = "operation_1"} ins(%cst : f32) outs(%2 : tensor<3x3xf32>) -> tensor<3x3xf32>
-    %4 = bufferization.alloc_tensor() : tensor<256x226x110x288xf32>
-    %5 = linalg.fill {tag = "operation_2"} ins(%cst : f32) outs(%4 : tensor<256x226x110x288xf32>) -> tensor<256x226x110x288xf32>
+    %0 = bufferization.alloc_tensor() : tensor<512x256xf32>
+    %1 = linalg.fill {tag = "operation_0"} ins(%cst : f32) outs(%0 : tensor<512x256xf32>) -> tensor<512x256xf32>
+    %2 = bufferization.alloc_tensor() : tensor<256x512xf32>
+    %3 = linalg.fill {tag = "operation_1"} ins(%cst : f32) outs(%2 : tensor<256x512xf32>) -> tensor<256x512xf32>
+    %4 = bufferization.alloc_tensor() : tensor<512x512xf32>
+    %5 = linalg.fill {tag = "operation_2"} ins(%cst : f32) outs(%4 : tensor<512x512xf32>) -> tensor<512x512xf32>
     %6 = call @nanoTime() : () -> i64
-    %7 = linalg.pooling_nhwc_min {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>, tag = "operation_3"} ins(%1, %3 : tensor<256x228x112x288xf32>, tensor<3x3xf32>) outs(%5 : tensor<256x226x110x288xf32>) -> tensor<256x226x110x288xf32>
-    %8 = bufferization.alloc_tensor() : tensor<1x1xf32>
-    %9 = bufferization.alloc_tensor() : tensor<256x113x55x288xf32>
-    %10 = linalg.pooling_nhwc_min {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>, tag = "operation_4"} ins(%7, %8 : tensor<256x226x110x288xf32>, tensor<1x1xf32>) outs(%9 : tensor<256x113x55x288xf32>) -> tensor<256x113x55x288xf32>
-    %11 = bufferization.alloc_tensor() : tensor<7x7xf32>
-    %12 = bufferization.alloc_tensor() : tensor<256x54x25x288xf32>
-    %13 = scf.for %arg0 = %c0 to %c256 step %c64 iter_args(%arg1 = %12) -> (tensor<256x54x25x288xf32>) {
-      %16 = scf.for %arg2 = %c0 to %c54 step %c1 iter_args(%arg3 = %arg1) -> (tensor<256x54x25x288xf32>) {
-        %17 = scf.for %arg4 = %c0 to %c25 step %c1 iter_args(%arg5 = %arg3) -> (tensor<256x54x25x288xf32>) {
-          %18 = scf.for %arg6 = %c0 to %c288 step %c16 iter_args(%arg7 = %arg5) -> (tensor<256x54x25x288xf32>) {
-            %19 = affine.apply #map(%arg2)
-            %20 = affine.apply #map(%arg4)
-            %extracted_slice = tensor.extract_slice %10[%arg0, %19, %20, %arg6] [64, 7, 7, 16] [1, 1, 1, 1] : tensor<256x113x55x288xf32> to tensor<64x7x7x16xf32>
-            %extracted_slice_0 = tensor.extract_slice %arg7[%arg0, %arg2, %arg4, %arg6] [64, 1, 1, 16] [1, 1, 1, 1] : tensor<256x54x25x288xf32> to tensor<64x1x1x16xf32>
-            %21 = linalg.pooling_nhwc_max {dilations = dense<1> : tensor<2xi64>, strides = dense<2> : tensor<2xi64>, tag = "operation_5"} ins(%extracted_slice, %11 : tensor<64x7x7x16xf32>, tensor<7x7xf32>) outs(%extracted_slice_0 : tensor<64x1x1x16xf32>) -> tensor<64x1x1x16xf32>
-            %inserted_slice = tensor.insert_slice %21 into %arg7[%arg0, %arg2, %arg4, %arg6] [64, 1, 1, 16] [1, 1, 1, 1] : tensor<64x1x1x16xf32> into tensor<256x54x25x288xf32>
-            scf.yield %inserted_slice : tensor<256x54x25x288xf32>
-          }
-          scf.yield %18 : tensor<256x54x25x288xf32>
-        }
-        scf.yield %17 : tensor<256x54x25x288xf32>
-      }
-      scf.yield %16 : tensor<256x54x25x288xf32>
-    }
-    %14 = call @nanoTime() : () -> i64
-    %15 = arith.subi %14, %6 : i64
-    call @printI64(%15) : (i64) -> ()
+    %7 = linalg.matmul {tag = "operation_3"} ins(%1, %3 : tensor<512x256xf32>, tensor<256x512xf32>) outs(%5 : tensor<512x512xf32>) -> tensor<512x512xf32>
+    %8 = bufferization.alloc_tensor() : tensor<512x1024xf32>
+    %9 = bufferization.alloc_tensor() : tensor<512x1024xf32>
+    %10 = linalg.matmul {tag = "operation_4"} ins(%7, %8 : tensor<512x512xf32>, tensor<512x1024xf32>) outs(%9 : tensor<512x1024xf32>) -> tensor<512x1024xf32>
+    %11 = bufferization.alloc_tensor() : tensor<1024x256xf32>
+    %12 = bufferization.alloc_tensor() : tensor<512x256xf32>
+    %13 = linalg.matmul {tag = "operation_5"} ins(%10, %11 : tensor<512x1024xf32>, tensor<1024x256xf32>) outs(%12 : tensor<512x256xf32>) -> tensor<512x256xf32>
+    %14 = bufferization.alloc_tensor() : tensor<256x128xf32>
+    %15 = bufferization.alloc_tensor() : tensor<512x128xf32>
+    %16 = linalg.matmul {tag = "operation_6"} ins(%13, %14 : tensor<512x256xf32>, tensor<256x128xf32>) outs(%15 : tensor<512x128xf32>) -> tensor<512x128xf32>
+    %17 = bufferization.alloc_tensor() : tensor<128x512xf32>
+    %18 = bufferization.alloc_tensor() : tensor<512x512xf32>
+    %19 = linalg.matmul {tag = "operation_7"} ins(%16, %17 : tensor<512x128xf32>, tensor<128x512xf32>) outs(%18 : tensor<512x512xf32>) -> tensor<512x512xf32>
+    %20 = call @nanoTime() : () -> i64
+    %21 = arith.subi %20, %6 : i64
+    call @printI64(%21) : (i64) -> ()
     call @printNewline() : () -> ()
-    return %13 : tensor<256x54x25x288xf32>
+    return %19 : tensor<512x512xf32>
   }
   func.func @main() {
     %c1 = arith.constant 1 : index
     %c0 = arith.constant 0 : index
     %c2 = arith.constant 2 : index
     scf.for %arg0 = %c0 to %c2 step %c1 {
-      %0 = func.call @matmul() : () -> tensor<256x54x25x288xf32>
+      %0 = func.call @matmul() : () -> tensor<512x512xf32>
     }
     return
   }

@@ -4,9 +4,9 @@
     "max_num_load_store_dim": 7,
     "num_tile_sizes": 7,
     "num_transformations": 7,
-    "vect_size_limit": 2048,
+    "vect_size_limit": 999999999999999999999,
     "use_bindings": false,
-    "use_vectorizer": false,
+    "use_vectorizer": true,
     "data_format": "json",
     "optimization_mode": "all",
     "benchmarks_folder_path": "",
@@ -18,7 +18,7 @@
     "entropy_coef": 0.01,
     "lr": 0.001,
     "truncate": 5,
-    "json_file": "./data/nn/final-operation-sequence-5.json",
+    "json_file": "t.json",
     "tags": ["nn"],
     "logging": true
 }

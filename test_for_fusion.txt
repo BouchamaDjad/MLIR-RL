@@ -1,83 +1,58 @@
-#map = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
-#map1 = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2)>
+
+#map = affine_map<(d0, d1, d2, d3) -> (0, d1, d2, d3)>
+#map1 = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 module attributes {torch.debug_module_name = "Net"} {
   func.func private @nanoTime() -> i64 attributes {llvm.emit_c_interface}
   func.func private @printFlops(f64)
   func.func private @printI64(i64)
   func.func private @printNewline()
   func.func private @printMemrefF32(tensor<*xf32>)
-  func.func @myFunction(%arg0: tensor<256x56x112x64xf32>, %arg1: tensor<7x7x64x96xf32>, %arg2: tensor<256x50x106x96xf32>) -> tensor<256x50x106x96xf32> {
-    %cst = arith.constant 0.000000e+00 : f32
-    %0 = linalg.conv_2d_nhwc_hwcf {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>} ins(%arg0, %arg1 : tensor<256x56x112x64xf32>, tensor<7x7x64x96xf32>) outs(%arg2 : tensor<256x50x106x96xf32>) -> tensor<256x50x106x96xf32>
-    %1 = bufferization.alloc_tensor() : tensor<256x50x106x96xf32>
-    %2 = bufferization.alloc_tensor() : tensor<256x50x106xf32>
-    %3 = linalg.fill ins(%cst : f32) outs(%2 : tensor<256x50x106xf32>) -> tensor<256x50x106xf32>
-    %reduced = linalg.reduce ins(%0 : tensor<256x50x106x96xf32>) outs(%3 : tensor<256x50x106xf32>) dimensions = [3] 
-      (%in: f32, %init: f32) {
-        %8 = arith.maximumf %in, %init : f32
-        linalg.yield %8 : f32
-      }
-    %4 = linalg.generic {indexing_maps = [#map, #map1, #map], iterator_types = ["parallel", "parallel", "parallel", "parallel"], library_call = "none"} ins(%0, %reduced : tensor<256x50x106x96xf32>, tensor<256x50x106xf32>) outs(%1 : tensor<256x50x106x96xf32>) {
-    ^bb0(%in: f32, %in_0: f32, %out: f32):
-      %8 = arith.subf %in, %in_0 : f32
-      %9 = math.exp %8 : f32
-      linalg.yield %9 : f32
-    } -> tensor<256x50x106x96xf32>
-    %5 = bufferization.alloc_tensor() : tensor<1x1xf32>
-    %6 = bufferization.alloc_tensor() : tensor<256x50x106x96xf32>
-    %7 = linalg.pooling_nchw_sum {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>} ins(%4, %5 : tensor<256x50x106x96xf32>, tensor<1x1xf32>) outs(%6 : tensor<256x50x106x96xf32>) -> tensor<256x50x106x96xf32>
-    return %7 : tensor<256x50x106x96xf32>
-  }
-  func.func @matmul() -> tensor<256x50x106x96xf32> {
+  func.func @matmul() -> tensor<128x288x56x56xf32> {
     %cst = arith.constant 0.000000e+00 : f32
     %cst_0 = arith.constant 2.000000e+00 : f32
-    %0 = bufferization.alloc_tensor() : tensor<256x56x112x64xf32>
-    %1 = linalg.fill ins(%cst_0 : f32) outs(%0 : tensor<256x56x112x64xf32>) -> tensor<256x56x112x64xf32>
-    %2 = bufferization.alloc_tensor() : tensor<7x7x64x96xf32>
-    %3 = linalg.fill ins(%cst_0 : f32) outs(%2 : tensor<7x7x64x96xf32>) -> tensor<7x7x64x96xf32>
-    %4 = bufferization.alloc_tensor() : tensor<256x50x106x96xf32>
-    %5 = linalg.fill ins(%cst_0 : f32) outs(%4 : tensor<256x50x106x96xf32>) -> tensor<256x50x106x96xf32>
-    %6 = call @nanoTime() : () -> i64
-    %7 = linalg.conv_2d_nhwc_hwcf {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>} ins(%1, %3 : tensor<256x56x112x64xf32>, tensor<7x7x64x96xf32>) outs(%5 : tensor<256x50x106x96xf32>) -> tensor<256x50x106x96xf32>
-    %8 = bufferization.alloc_tensor() : tensor<256x50x106x96xf32>
-    %9 = bufferization.alloc_tensor() : tensor<256x50x106xf32>
-    %10 = linalg.fill ins(%cst : f32) outs(%9 : tensor<256x50x106xf32>) -> tensor<256x50x106xf32>
-    %reduced = linalg.reduce ins(%7 : tensor<256x50x106x96xf32>) outs(%10 : tensor<256x50x106xf32>) dimensions = [3] 
-      (%in: f32, %init: f32) {
-        %17 = arith.maximumf %in, %init : f32
-        linalg.yield %17 : f32
-      }
-    %11 = linalg.generic {indexing_maps = [#map, #map1, #map], iterator_types = ["parallel", "parallel", "parallel", "parallel"], library_call = "none"} ins(%7, %reduced : tensor<256x50x106x96xf32>, tensor<256x50x106xf32>) outs(%8 : tensor<256x50x106x96xf32>) {
-    ^bb0(%in: f32, %in_1: f32, %out: f32):
-      %17 = arith.subf %in, %in_1 : f32
-      %18 = math.exp %17 : f32
+    %0 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+    %1 = linalg.fill {tag = "operation_0"} ins(%cst_0 : f32) outs(%0 : tensor<128x288x56x56xf32>) -> tensor<128x288x56x56xf32>
+    %2 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+    %3 = linalg.fill {tag = "operation_1"} ins(%cst_0 : f32) outs(%2 : tensor<128x288x56x56xf32>) -> tensor<128x288x56x56xf32>
+    %4 = call @nanoTime() : () -> i64
+    %5 = linalg.generic {indexing_maps = [#map, #map1], iterator_types = ["parallel", "parallel", "parallel", "parallel"]} ins(%1 : tensor<128x288x56x56xf32>) outs(%3 : tensor<128x288x56x56xf32>) attrs =  {tag = "operation_2"} {
+    ^bb0(%in: f32, %out: f32):
+      %17 = arith.cmpf ugt, %in, %cst : f32
+      %18 = arith.select %17, %in, %cst : f32
       linalg.yield %18 : f32
-    } -> tensor<256x50x106x96xf32>
-    %12 = bufferization.alloc_tensor() : tensor<1x1xf32>
-    %13 = bufferization.alloc_tensor() : tensor<256x50x106x96xf32>
-    %14 = linalg.pooling_nchw_sum {dilations = dense<1> : tensor<2xi64>, strides = dense<1> : tensor<2xi64>} ins(%11, %12 : tensor<256x50x106x96xf32>, tensor<1x1xf32>) outs(%13 : tensor<256x50x106x96xf32>) -> tensor<256x50x106x96xf32>
+    } -> tensor<128x288x56x56xf32>
+    %6 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+    %7 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+    %8 = linalg.add {tag = "operation_3"} ins(%5, %6 : tensor<128x288x56x56xf32>, tensor<128x288x56x56xf32>) outs(%7 : tensor<128x288x56x56xf32>) -> tensor<128x288x56x56xf32>
+    %9 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+    %10 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+    %11 = linalg.add {tag = "operation_4"} ins(%8, %9 : tensor<128x288x56x56xf32>, tensor<128x288x56x56xf32>) outs(%10 : tensor<128x288x56x56xf32>) -> tensor<128x288x56x56xf32>
+    %12 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+    %13 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+    %14 = linalg.add {tag = "operation_5"} ins(%11, %12 : tensor<128x288x56x56xf32>, tensor<128x288x56x56xf32>) outs(%13 : tensor<128x288x56x56xf32>) -> tensor<128x288x56x56xf32>
     %15 = call @nanoTime() : () -> i64
-    %16 = arith.subi %15, %6 : i64
+    %16 = arith.subi %15, %4 : i64
     call @printI64(%16) : (i64) -> ()
     call @printNewline() : () -> ()
-    return %14 : tensor<256x50x106x96xf32>
+    return %14 : tensor<128x288x56x56xf32>
   }
   func.func @main() {
     %c1 = arith.constant 1 : index
     %c0 = arith.constant 0 : index
     %c2 = arith.constant 2 : index
     scf.for %arg0 = %c0 to %c2 step %c1 {
-      %0 = bufferization.alloc_tensor() : tensor<256x56x112x64xf32>
-      %1 = bufferization.alloc_tensor() : tensor<7x7x64x96xf32>
-      %2 = bufferization.alloc_tensor() : tensor<256x50x106x96xf32>
-      %3 = func.call @nanoTime() : () -> i64
-      %4 = bufferization.alloc_tensor() : tensor<256x50x106x96xf32>
-      %5 = bufferization.alloc_tensor() : tensor<256x50x106xf32>
-      %6 = bufferization.alloc_tensor() : tensor<1x1xf32>
-      %7 = bufferization.alloc_tensor() : tensor<256x50x106x96xf32>
-      %8 = func.call @nanoTime() : () -> i64
-      %9 = arith.subi %8, %3 : i64
-      func.call @printI64(%9) : (i64) -> ()
+      %0 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+      %1 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+      %2 = func.call @nanoTime() : () -> i64
+      %3 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+      %4 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+      %5 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+      %6 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+      %7 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+      %8 = bufferization.alloc_tensor() : tensor<128x288x56x56xf32>
+      %9 = func.call @nanoTime() : () -> i64
+      %10 = arith.subi %9, %2 : i64
+      func.call @printI64(%10) : (i64) -> ()
       func.call @printNewline() : () -> ()
     }
     return

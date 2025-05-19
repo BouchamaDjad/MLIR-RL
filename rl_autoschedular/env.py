@@ -356,10 +356,24 @@ class Env:
                 # TODO: Look into rebuilding the operation features
                 
                 # add the fused ops into the set
-                state.fused_ops.update([state.operation_tag, state.consumer_tag])
                 
-                # if the there is still consumers to fuse update the consumer information in the state
+                for producer_tag in state.operation_features.producers:
+                   prod_features = bench_data.operations[producer_tag]
+                   op_type = self.get_operation_type(prod_features.raw_operation)
+                   
+                   if op_type == 'linalg.fill':
+                       new_code = transform_dialect_fuse_only(transformed_code, state.operation_tag, producer_tag, state.tmp_file)
+                       
+                       if new_code:
+                           # if fusion succesful apply vectorisation
+                           new_code = transform_dialect_vectorise_with_vectorizer(new_code, producer_tag, state.tmp_file)
+                           
+                           if new_code:
+                               # both fusion and vect are successful update the code
+                               transformed_code = new_code
+                               
                 if transformation =='fusion':
+                    state.fused_ops.update([state.operation_tag, state.consumer_tag])
                     if state.consumer_features is not None and (state.current_consumer + 1) < len(state.operation_features.consumers):
 
                         state.current_consumer += 1
@@ -369,6 +383,9 @@ class Env:
 
                     else:
                         state.consumer_tag == None
+                
+                else: # parall
+                    state.fused_ops.update([state.operation_tag])
             
             # TODO: maybe create a new set for tiled ops
             elif transformed_code and transformation == "tiling":
@@ -430,23 +447,6 @@ class Env:
                     timeout=20,
                     use_vectorizer=cfg.use_vectorizer
                 )
-                
-            # if we vectorise an operation check if fill op exist in its producers, if yes fuse them and vectorise
-            if transformation == 'vectorization':
-               for producer_tag in state.operation_features.producers:
-                   prod_features = bench_data.operations[producer_tag]
-                   op_type = self.get_operation_type(prod_features.raw_operation)
-                   
-                   if op_type == 'fill':
-                       new_code = transform_dialect_fuse_only(transformed_code, state.operation_tag, producer_tag, state.tmp_file)
-                       
-                       if new_code:
-                           # if fusion succesful apply vectorisation
-                           new_code = transform_dialect_vectorise_with_vectorizer(new_code, producer_tag, state.tmp_file)
-                           
-                           if new_code:
-                               # both fusion and vect are successful update the code
-                               transformed_code = new_code
                                                       
         trans_failed = not transformed_code  # This indicates that the transformation failed or timed out
         if trans_failed:
@@ -470,7 +470,7 @@ class Env:
             new_actions_mask = self.update_action_mask(state, transformation, num_loops)
 
             #TODO: Better to be put it in the update_action_mask function            
-            if transformation == 'fusion':
+            if transformation == 'fusion' or transformation == 'parallelization':
                 # change the mask to only allow vectorisation in the next step
                 vectorization_index = 4
                 new_actions_mask[:cfg.num_transformations] = [False, False, False, False, False, False, False]
@@ -504,7 +504,7 @@ class Env:
 
                 speedup_metric = state.exec_time / new_exec_time
                 print('-' * 30)
-                print(f"Operation: {state.bench_name} - {state.operation_tag}")
+                print(f"Operation: {self.bench_index} - {state.operation_tag}")
                 print(state.transformation_history)
                 print('Relative speedup:', speedup_metric)
                 print('root Exec time:', state.root_exec_time * 10**-9, 's')
@@ -512,6 +512,7 @@ class Env:
                 print('New Exec time:', new_exec_time * 10**-9, 's')
                 print(f"reward: {reward}")
                 print(f"cummulative reward: {state.cummulative_reward + reward}")
+                print('-' * 30)
 
                 # TODO: Check what is happening here
                 # Re-extract operations data from the new code
@@ -628,7 +629,6 @@ class Env:
             if bench_passed:
                 # We calculate the speedup
                 reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
-                next_state.exec_time = new_exec_time
             else:
                 reward -= 20
                 print_error("ASSERTION FAILED")
@@ -750,7 +750,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [False, True, True, True, False, False, True]
+            action_mask[:TP_BEGIN] = [False, True, False, False, False, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -807,7 +807,7 @@ class Env:
                     actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
 
             if transformation == 'tiling':
-                actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, False, False, False, True]
 
         elif state.operation_type == "conv_2d+img2col":
             if transformation == 'parallelization':
@@ -817,19 +817,19 @@ class Env:
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'tiling':
-                actions_mask[:TP_BEGIN] = [True, False, True, True, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, True, True, False, False, True]
             if transformation == 'interchange':
-                actions_mask[:TP_BEGIN] = [True, False, False, True, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, True, False, False, True]
 
         elif state.operation_type in ["generic", "func.call"]:
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'interchange':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, True, True, True, False, False]
-                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, True, True, True, False, False, True]
             if transformation == 'tiling':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, False, False, True, False, False]
-                actions_mask[:TP_BEGIN] = [True, True, True, True, True, False, True]
+                actions_mask[:TP_BEGIN] = [True, True, True, True, False, False, True]
 
         # TODO: look into the possibilty of removing this else branch
         else:

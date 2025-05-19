@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # Define the resource requirements here using #SBATCH
-
 #SBATCH -p compute
 #SBATCH --exclusive
 #SBATCH --nodes=1

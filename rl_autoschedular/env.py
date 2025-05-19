@@ -202,8 +202,8 @@ class Env:
         # TODO: Add case where data_format is "json" and reload data from json file if needed (if optimization mode is "all")
 
         # Get the last operation
-        operation_index = 0
-        operation_tag = benchmark_data.operation_tags[0]
+        operation_index = len(benchmark_data.operation_tags) - 1
+        operation_tag = benchmark_data.operation_tags[operation_index]
         operation_features = benchmark_data.operations[operation_tag]
         num_loops = len(operation_features.nested_loops)
 
@@ -211,12 +211,12 @@ class Env:
         raw_operation = operation_features.raw_operation
         operation_type = self.get_operation_type(raw_operation)
 
-        # Skip unknown operations or those with no loops
-        while operation_index < len(benchmark_data.operation_tags) -1 and \
+        # Skip unknown operations or those with no loops        
+        while operation_index > 0 and \
             ( operation_type in self.skipped_operations or len(operation_features.nested_loops) == 0):
             print_alert(f"skipping: {raw_operation}")
 
-            operation_index = operation_index + 1
+            operation_index = operation_index - 1
             operation_tag = benchmark_data.operation_tags[operation_index]
             operation_features = benchmark_data.operations[operation_tag]
             num_loops = len(operation_features.nested_loops)
@@ -242,12 +242,12 @@ class Env:
         # 4 because we have 4 transformations that require parameters: TP, T, I, TF
         actions = np.zeros((cfg.max_num_loops, 4, cfg.truncate,))
 
-        if len(operation_features.consumers) != 0:
-            consumer_tag = operation_features.consumers[0]
-            consumer_features = benchmark_data.operations[consumer_tag]
+        if len(operation_features.producers) != 0:
+            producer_tag = operation_features.producers[0]
+            producer_features = benchmark_data.operations[producer_tag]
         else:
-            consumer_tag = None
-            consumer_features = None
+            producer_tag = None
+            producer_features = None
             
         state = OperationState(
             bench_name=bench_name,
@@ -255,9 +255,9 @@ class Env:
             operation_index=operation_index,
             operation_type=operation_type,
             operation_features=operation_features,
-            current_consumer = 0,
-            consumer_tag = consumer_tag,
-            consumer_features = consumer_features,
+            current_producer = 0,
+            producer_tag = producer_tag,
+            producer_features = producer_features,
             fused_ops = set(),
             transformed_code=benchmark_data.code,
             actions=actions,
@@ -265,6 +265,7 @@ class Env:
             step_count=0,
             exec_time=benchmark_data.exec_time,
             root_exec_time=benchmark_data.exec_time,
+            empty_schedule=True,
             transformation_history=[],
             cummulative_reward=0,
             tmp_file=self.tmp_file
@@ -310,6 +311,10 @@ class Env:
 
         print_info("RAW:", raw_action)
         print_success("PROCESSED:", transformation, parameters)
+
+        # To detect if the model has chosen only the "no_transformation" action
+        if state.empty_schedule and transformation != "no_transformation":
+            state.empty_schedule = False
 
         reward = 0
         transformed_code = state.transformed_code
@@ -357,6 +362,7 @@ class Env:
                     step_count=state.step_count + 1,
                     exec_time=state.exec_time,
                     root_exec_time=state.root_exec_time,
+                    empty_schedule = state.empty_schedule,
                     transformation_history=state.transformation_history + [(transformation, parameters)],
                     cummulative_reward=state.cummulative_reward,
                     tmp_file=self.tmp_file
@@ -369,19 +375,18 @@ class Env:
                 # TODO: Look into rebuilding the operation features
                 
                 # add the fused ops into the set
-                state.fused_ops.update([state.operation_tag, state.consumer_tag])
+                state.fused_ops.update([state.operation_tag, state.producer_tag])
                 
-                # if the there is still consumers to fuse update the consumer information in the state
-                if transformation =='fusion':
-                    if state.consumer_features is not None and (state.current_consumer + 1) < len(state.operation_features.consumers):
+                # if the there is still producers to fuse update the producer information in the state
+                if state.producer_features is not None and (state.current_producer + 1) < len(state.operation_features.producers):
 
-                        state.current_consumer += 1
-                        state.consumer_tag = state.operation_features.consumers[state.current_consumer]
-                        state.consumer_features = bench_data.operations[state.consumer_tag]
+                    state.current_producer += 1
+                    state.producer_tag = state.operation_features.producers[state.current_producer]
+                    state.producer_features = bench_data.operations[state.producer_tag]
 
 
-                    else:
-                        state.consumer_tag = None
+                else:
+                    state.producer_tag = None
             
             # TODO: maybe create a new set for tiled ops
             elif transformed_code and transformation in ['parallelization',"tiling"]:
@@ -474,7 +479,10 @@ class Env:
 
             transformed_code = state.transformed_code
             reward -= 5        
-        
+
+        # To not re-evaluate the schedule if we are at Done
+        evaluated_step = False
+
         if transformation not in ['no_transformation', 'vectorization'] and state.step_count < cfg.truncate and \
             not state.operation_type in self.skipped_operations:
 
@@ -497,9 +505,9 @@ class Env:
                 operation_index=state.operation_index,
                 operation_type=state.operation_type,
                 operation_features=state.operation_features,
-                current_consumer = state.current_consumer,
-                consumer_tag = state.consumer_tag,
-                consumer_features = state.consumer_features,
+                current_producer = state.current_producer,
+                producer_tag = state.producer_tag,
+                producer_features = state.producer_features,
                 fused_ops = state.fused_ops,
                 transformed_code=transformed_code,  # New transformed code
                 actions=next_state_actions,  # New actions
@@ -507,15 +515,17 @@ class Env:
                 step_count=state.step_count + 1,
                 exec_time=state.exec_time,
                 root_exec_time=state.root_exec_time,
+                empty_schedule=state.empty_schedule,
                 transformation_history=state.transformation_history + [(transformation, parameters)],
                 cummulative_reward=state.cummulative_reward,
                 tmp_file=self.tmp_file
             )
         else:
             # Switch to the Next operation
-            if not trans_failed and state.operation_index < len(bench_data.operation_tags) - 1:
+            if not trans_failed and state.operation_index > 0:
                 
                 reward, new_exec_time, execution_error = self.evaluate_step(transformed_code, state, transformation, parameters, reward)              
+                evaluated_step = True
                 # TODO: see if this could be usefull
                 # if execution_error:
                 #     trans_failed = True
@@ -536,29 +546,29 @@ class Env:
                 # self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
 
                 # Build a new state that points to the next operation
-                new_op_tag = bench_data.operation_tags[state.operation_index + 1]
+                new_op_tag = bench_data.operation_tags[state.operation_index - 1]
                 new_op_features = bench_data.operations[new_op_tag]
                 
-                operation_index = state.operation_index + 1
+                operation_index = state.operation_index - 1
                 raw_operation = new_op_features.raw_operation
                 new_operation_type = self.get_operation_type(raw_operation)
                 
                 if len(new_op_features.producers) != 0:
-                    consumer_tag = new_op_features.producers[0]
-                    consumer_features = self.benchmarks_data[self.bench_index][1].operations[consumer_tag]
+                    producer_tag = new_op_features.producers[0]
+                    producer_features = self.benchmarks_data[self.bench_index][1].operations[producer_tag]
                     
                 else:
-                    consumer_tag = None
-                    consumer_features = None
+                    producer_tag = None
+                    producer_features = None
                 
                 # Skip unknown operations or those with no loops
                 # TODO: figure out what to do with the case where index 0 is unknown
-                while operation_index < len(bench_data.operation_tags) - 1 and \
+                while operation_index > 0 and \
                     ( new_operation_type in self.skipped_operations or len(new_op_features.nested_loops) == 0):
 
                     print_alert(f"skipping: {raw_operation}")
 
-                    operation_index = operation_index + 1
+                    operation_index = operation_index - 1
                     new_op_tag = bench_data.operation_tags[operation_index]
                     new_op_features = bench_data.operations[new_op_tag]
 
@@ -581,9 +591,9 @@ class Env:
                         operation_index=operation_index,
                         operation_type=new_operation_type,
                         operation_features=new_op_features,
-                        current_consumer = 0,
-                        consumer_tag = consumer_tag,
-                        consumer_features = consumer_features,
+                        current_producer = 0,
+                        producer_tag = producer_tag,
+                        producer_features = producer_features,
                         fused_ops = state.fused_ops,
                         transformed_code=transformed_code,
                         actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
@@ -591,6 +601,7 @@ class Env:
                         step_count=0,
                         exec_time=new_exec_time,
                         root_exec_time=state.root_exec_time,
+                        empty_schedule=state.empty_schedule,
                         transformation_history=[],
                         cummulative_reward=state.cummulative_reward,
                         tmp_file=self.tmp_file
@@ -611,15 +622,20 @@ class Env:
         #   Error occured in the transformation
         done = (trans_failed) or \
             (next_state.operation_type in self.skipped_operations) or \
-            (next_state.operation_index == len(bench_data.operation_tags) - 1 and (
+            (next_state.operation_index == 0 and (
                     transformation in ['no_transformation', 'vectorization'] or \
                     next_state.step_count >= cfg.truncate
                 )
             )
 
         if done:
-            reward, new_exec_time, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
-            next_state.exec_time = new_exec_time
+            if not evaluated_step:
+                reward, new_exec_time, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
+                next_state.exec_time = new_exec_time
+
+            # if next_state.empty_schedule:
+            #     reward -= 0.2
+            #     print_alert("the model was penalized for an empty_schedule with -0.2")
 
         next_state.cummulative_reward += reward
 
@@ -727,9 +743,9 @@ class Env:
         # ))
         curr_tree = build_loop_tree_from_ast(state.operation_features.nested_loops, op_features_vector)
         
-        if state.consumer_tag != None:
-            prod_features_vector = build_op_features_vector(state.consumer_features)
-            prod_tree = build_loop_tree_from_ast(state.consumer_features.nested_loops,prod_features_vector)
+        if state.producer_tag != None:
+            prod_features_vector = build_op_features_vector(state.producer_features)
+            prod_tree = build_loop_tree_from_ast(state.producer_features.nested_loops,prod_features_vector)
         else:
             
             prod_tree = None
@@ -772,7 +788,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [True, True, False, False, False, False, True] # temporary
+            action_mask[:TP_BEGIN] = [True, True, True, True, False, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -992,9 +1008,9 @@ class Env:
             tuple[str, list[int]]: The transformation and its parameters.
         """
 
+        action_name, parameter = raw_action
         op_features = state.operation_features
         num_loops = len(op_features.nested_loops)
-        action_name, parameter = raw_action
 
         # Sellect the tiling candidates for each loop
         if action_name in ['tiling', 'parallelization', 'fusion']:

@@ -45,10 +45,11 @@ def train_eval_split(eval_size: float = 0.2):
         json_data = json.load(file)
     
     json_data = list(json_data.items())
+    random.shuffle(json_data)
 
     # Split the benchmarks data into training and evaluation sets
     split_index = int(len(json_data) * (1 - eval_size))
-    random.shuffle(json_data)
+
     env_json_data, eval_env_json_data = json_data[:split_index], json_data[split_index:]
 
     env = ParallelEnv(
@@ -102,7 +103,7 @@ class Env:
 
         self.skipped_operations = [
             "unknown", 
-            "linalg.fill"
+            "fill"
         ]
 
         # Get benchmarks data
@@ -167,7 +168,9 @@ class Env:
         elif 'func.call' in raw_operation:
             operation_type = 'func.call'
         elif 'linalg.fill' in raw_operation:
-            operation_type = 'linalg.fill'
+            operation_type = 'fill'
+        elif "linalg.reduce" in raw_operation:
+            operation_type = 'generic' # TODO: check if this is correct
 
         return operation_type
 
@@ -199,8 +202,8 @@ class Env:
         # TODO: Add case where data_format is "json" and reload data from json file if needed (if optimization mode is "all")
 
         # Get the last operation
-        operation_index = 0
-        operation_tag = benchmark_data.operation_tags[0]
+        operation_index = len(benchmark_data.operation_tags) - 1
+        operation_tag = benchmark_data.operation_tags[operation_index]
         operation_features = benchmark_data.operations[operation_tag]
         num_loops = len(operation_features.nested_loops)
 
@@ -208,12 +211,12 @@ class Env:
         raw_operation = operation_features.raw_operation
         operation_type = self.get_operation_type(raw_operation)
 
-        # Skip unknown operations or those with no loops
-        while operation_index < len(benchmark_data.operation_tags) -1 and \
+        # Skip unknown operations or those with no loops        
+        while operation_index > 0 and \
             ( operation_type in self.skipped_operations or len(operation_features.nested_loops) == 0):
             print_alert(f"skipping: {raw_operation}")
 
-            operation_index = operation_index + 1
+            operation_index = operation_index - 1
             operation_tag = benchmark_data.operation_tags[operation_index]
             operation_features = benchmark_data.operations[operation_tag]
             num_loops = len(operation_features.nested_loops)
@@ -236,25 +239,25 @@ class Env:
         #     file.write(benchmark_data.code)
         
         # Action history:
-        # 3 because we have 3 transformations that require parameters: TP, T, I
+        # 4 because we have 4 transformations that require parameters: TP, T, I, TF
         actions = np.zeros((cfg.max_num_loops, 4, cfg.truncate,))
 
-        if len(operation_features.consumers) != 0:
-            consumer_tag = operation_features.consumers[0]
-            consumer_features = benchmark_data.operations[consumer_tag]
+        if len(operation_features.producers) != 0:
+            producer_tag = operation_features.producers[0]
+            producer_features = benchmark_data.operations[producer_tag]
         else:
-            consumer_tag = None
-            consumer_features = None
+            producer_tag = None
+            producer_features = None
             
         state = OperationState(
             bench_name=bench_name,
             operation_tag=operation_tag,
-            operation_index =operation_index,
+            operation_index=operation_index,
             operation_type=operation_type,
             operation_features=operation_features,
-            current_consumer = 0,
-            consumer_tag = consumer_tag,
-            consumer_features = consumer_features,
+            current_producer = 0,
+            producer_tag = producer_tag,
+            producer_features = producer_features,
             fused_ops = set(),
             transformed_code=benchmark_data.code,
             actions=actions,
@@ -262,6 +265,7 @@ class Env:
             step_count=0,
             exec_time=benchmark_data.exec_time,
             root_exec_time=benchmark_data.exec_time,
+            empty_schedule=True,
             transformation_history=[],
             cummulative_reward=0,
             tmp_file=self.tmp_file
@@ -287,6 +291,10 @@ class Env:
             OperationState: The next state of the environment.
             Optional[OperationState]: The final state of the environment if the episode is done.
         """
+        if state.step_count == 0:
+            print('-' * 30)
+            print(f"Operation: {state.bench_name} - {state.operation_tag}")
+            print(f"Operation type: {state.operation_type}")
 
         # The number of loops in the Linalg operations
         num_loops = len(state.operation_features.nested_loops)
@@ -304,7 +312,13 @@ class Env:
         print_info("RAW:", raw_action)
         print_success("PROCESSED:", transformation, parameters)
 
+        # To detect if the model has chosen only the "no_transformation" action
+        if state.empty_schedule and transformation != "no_transformation":
+            state.empty_schedule = False
+
         reward = 0
+        transformed_code = state.transformed_code
+
         if transformation not in ['no_transformation', 'vectorization']:
             # Apply the transformation and get the new code
             transformed_code = apply_transformation_with_timeout(
@@ -326,6 +340,8 @@ class Env:
                 # to prepare it for the optimization in the next iterations
 
                 prints = get_ops_by_tags(transformed_code, [state.operation_tag], self.tmp_file)
+                assert len(prints.values()) != 0
+                # if len(prints.values()) != 0:
                 raw_operation = list(prints.values())[0]
 
                 operation_features = extract_op_features_from_affine_code(raw_operation, self.tmp_file)
@@ -346,12 +362,15 @@ class Env:
                     step_count=state.step_count + 1,
                     exec_time=state.exec_time,
                     root_exec_time=state.root_exec_time,
+                    empty_schedule = state.empty_schedule,
                     transformation_history=state.transformation_history + [(transformation, parameters)],
                     cummulative_reward=state.cummulative_reward,
                     tmp_file=self.tmp_file
                 )
+                # else:
+                #     transformed_code = ""
 
-            elif transformed_code and (transformation == "fusion" or transformation == 'parallelization'):
+            elif transformed_code and transformation == "fusion":
 
                 # TODO: Look into rebuilding the operation features
                 
@@ -376,19 +395,19 @@ class Env:
                     state.fused_ops.update([state.operation_tag, state.consumer_tag])
                     if state.consumer_features is not None and (state.current_consumer + 1) < len(state.operation_features.consumers):
 
-                        state.current_consumer += 1
-                        state.consumer_tag = state.operation_features.consumers[state.current_consumer]
-                        state.consumer_features = bench_data.operations[state.consumer_tag]
+                    state.current_producer += 1
+                    state.producer_tag = state.operation_features.producers[state.current_producer]
+                    state.producer_features = bench_data.operations[state.producer_tag]
 
 
-                    else:
-                        state.consumer_tag == None
+                else:
+                    state.producer_tag = None
                 
                 else: # parall
                     state.fused_ops.update([state.operation_tag])
             
             # TODO: maybe create a new set for tiled ops
-            elif transformed_code and transformation == "tiling":
+            elif transformed_code and transformation in ['parallelization',"tiling"]:
                 state.fused_ops.update([state.operation_tag])
             
 
@@ -453,13 +472,18 @@ class Env:
             # We keep the same code as previously
             # We get a penalty of -5
             print_error(f'FAILED TRANSFORM: {transformation} {parameters} {state.transformation_history}')
-            # This will create the file if it doesn't exist, or overwrite it if it does
-            with open(f'./errors_files/{self.bench_index}_{state.operation_tag}.mlir', 'w') as f:
-                f.write(bench_data.code)
+            if transformation in ["vectorization", "fusion"]:
+                # This will create the file if it doesn't exist, or overwrite it if it does
+                with open(f'./errors_files/{bench_data.bench_name}_{state.operation_tag}.mlir', 'w') as f:
+                    f.write(f"# Error in the transformation {transformation}, {parameters}, {state.transformation_history}\n")
+                    f.write(state.transformed_code)
 
             transformed_code = state.transformed_code
             reward -= 5        
-        
+
+        # To not re-evaluate the schedule if we are at Done
+        evaluated_step = False
+
         if transformation not in ['no_transformation', 'vectorization'] and state.step_count < cfg.truncate and \
             not state.operation_type in self.skipped_operations:
 
@@ -482,27 +506,34 @@ class Env:
                 operation_index=state.operation_index,
                 operation_type=state.operation_type,
                 operation_features=state.operation_features,
-                current_consumer = state.current_consumer,
-                consumer_tag = state.consumer_tag,
-                consumer_features = state.consumer_features,
+                current_producer = state.current_producer,
+                producer_tag = state.producer_tag,
+                producer_features = state.producer_features,
                 fused_ops = state.fused_ops,
                 transformed_code=transformed_code,  # New transformed code
                 actions=next_state_actions,  # New actions
                 actions_mask=new_actions_mask,  # New action mask
                 step_count=state.step_count + 1,
-                exec_time=state.exec_time,  # New execution time
+                exec_time=state.exec_time,
                 root_exec_time=state.root_exec_time,
+                empty_schedule=state.empty_schedule,
                 transformation_history=state.transformation_history + [(transformation, parameters)],
                 cummulative_reward=state.cummulative_reward,
                 tmp_file=self.tmp_file
             )
         else:
             # Switch to the Next operation
-            if state.operation_index < len(bench_data.operation_tags) - 1:
+            if not trans_failed and state.operation_index > 0:
                 
-                reward, new_exec_time = self.evaluate_step(transformed_code, state, transformation, parameters, reward)                
+                reward, new_exec_time, execution_error = self.evaluate_step(transformed_code, state, transformation, parameters, reward)              
+                evaluated_step = True
+                # TODO: see if this could be usefull
+                # if execution_error:
+                #     trans_failed = True
 
                 speedup_metric = state.exec_time / new_exec_time
+                print("\n")
+                print(state.transformation_history + [(transformation, parameters)])
                 print('-' * 30)
                 print(f"Operation: {self.bench_index} - {state.operation_tag}")
                 print(state.transformation_history)
@@ -520,29 +551,29 @@ class Env:
                 # self.benchmarks_data[self.bench_index] = (bench_name, new_bench_data)
 
                 # Build a new state that points to the next operation
-                new_op_tag = bench_data.operation_tags[state.operation_index + 1]
+                new_op_tag = bench_data.operation_tags[state.operation_index - 1]
                 new_op_features = bench_data.operations[new_op_tag]
                 
-                operation_index = state.operation_index + 1
+                operation_index = state.operation_index - 1
                 raw_operation = new_op_features.raw_operation
                 new_operation_type = self.get_operation_type(raw_operation)
                 
                 if len(new_op_features.producers) != 0:
-                    consumer_tag = new_op_features.producers[0]
-                    consumer_features = self.benchmarks_data[self.bench_index][1].operations[consumer_tag]
+                    producer_tag = new_op_features.producers[0]
+                    producer_features = self.benchmarks_data[self.bench_index][1].operations[producer_tag]
                     
                 else:
-                    consumer_tag = None
-                    consumer_features = None
+                    producer_tag = None
+                    producer_features = None
                 
                 # Skip unknown operations or those with no loops
                 # TODO: figure out what to do with the case where index 0 is unknown
-                while operation_index < len(bench_data.operation_tags) - 1 and \
+                while operation_index > 0 and \
                     ( new_operation_type in self.skipped_operations or len(new_op_features.nested_loops) == 0):
 
                     print_alert(f"skipping: {raw_operation}")
 
-                    operation_index = operation_index + 1
+                    operation_index = operation_index - 1
                     new_op_tag = bench_data.operation_tags[operation_index]
                     new_op_features = bench_data.operations[new_op_tag]
 
@@ -554,6 +585,7 @@ class Env:
                     # TODO: create an action mask where only vect is open for the case where we fused the next operation
                     actions_mask = self.initialize_action_mask(len(new_op_features.nested_loops), new_operation_type)
                     
+                    # TODO: add state or just `state.fused_ops` as parameter to initialize_action_mask
                     if new_op_tag in state.fused_ops:
                         # set vectorisation to true, all else false
                         actions_mask[:cfg.num_transformations] = [False, False, False, False, True, False, False]
@@ -564,16 +596,17 @@ class Env:
                         operation_index=operation_index,
                         operation_type=new_operation_type,
                         operation_features=new_op_features,
-                        current_consumer = 0,
-                        consumer_tag = consumer_tag,
-                        consumer_features = consumer_features,
+                        current_producer = 0,
+                        producer_tag = producer_tag,
+                        producer_features = producer_features,
                         fused_ops = state.fused_ops,
                         transformed_code=transformed_code,
                         actions=np.zeros((cfg.max_num_loops, 4, cfg.truncate)),
                         actions_mask=actions_mask,
                         step_count=0,
-                        exec_time=state.exec_time,
+                        exec_time=new_exec_time,
                         root_exec_time=state.root_exec_time,
+                        empty_schedule=state.empty_schedule,
                         transformation_history=[],
                         cummulative_reward=state.cummulative_reward,
                         tmp_file=self.tmp_file
@@ -581,9 +614,12 @@ class Env:
                 else:
                     next_state = state
                     next_state.operation_index = 0
+                    next_state.step_count += 1
+                    next_state.transformed_code = transformed_code
 
             else:
                 next_state = state
+
         # Done == True if:
         #   We surpass the maximum number of steps (size of the schedule)
         #   The last operation is an unknown operation
@@ -591,14 +627,20 @@ class Env:
         #   Error occured in the transformation
         done = (trans_failed) or \
             (next_state.operation_type in self.skipped_operations) or \
-            (next_state.operation_index == len(bench_data.operation_tags) - 1 and (
+            (next_state.operation_index == 0 and (
                     transformation in ['no_transformation', 'vectorization'] or \
                     next_state.step_count >= cfg.truncate
                 )
             )
 
         if done:
-            reward, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
+            if not evaluated_step:
+                reward, new_exec_time, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
+                next_state.exec_time = new_exec_time
+
+            # if next_state.empty_schedule:
+            #     reward -= 0.2
+            #     print_alert("the model was penalized for an empty_schedule with -0.2")
 
         next_state.cummulative_reward += reward
 
@@ -619,7 +661,7 @@ class Env:
         if cfg.use_bindings:
             new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
         else:
-            new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=120)
+            new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=150)
         # Print infos and update reward
         if new_exec_time is None:
             reward -= 20
@@ -629,12 +671,13 @@ class Env:
             if bench_passed:
                 # We calculate the speedup
                 reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
+                # next_state.exec_time = new_exec_time
             else:
                 reward -= 20
                 print_error("ASSERTION FAILED")
                 new_exec_time = next_state.exec_time
 
-        return reward, new_exec_time
+        return reward, new_exec_time, (new_exec_time is None or not bench_passed)
 
     def get_obs_old(self, state: OperationState):
         """Build the obervation vector for the input state.
@@ -705,9 +748,9 @@ class Env:
         # ))
         curr_tree = build_loop_tree_from_ast(state.operation_features.nested_loops, op_features_vector)
         
-        if state.consumer_tag != None:
-            prod_features_vector = build_op_features_vector(state.consumer_features)
-            prod_tree = build_loop_tree_from_ast(state.consumer_features.nested_loops,prod_features_vector)
+        if state.producer_tag != None:
+            prod_features_vector = build_op_features_vector(state.producer_features)
+            prod_tree = build_loop_tree_from_ast(state.producer_features.nested_loops,prod_features_vector)
         else:
             
             prod_tree = None
@@ -750,7 +793,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [False, True, False, False, False, False, True]
+            action_mask[:TP_BEGIN] = [True, True, True, True, False, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False
@@ -970,9 +1013,9 @@ class Env:
             tuple[str, list[int]]: The transformation and its parameters.
         """
 
+        action_name, parameter = raw_action
         op_features = state.operation_features
         num_loops = len(op_features.nested_loops)
-        action_name, parameter = raw_action
 
         # Sellect the tiling candidates for each loop
         if action_name in ['tiling', 'parallelization', 'fusion']:

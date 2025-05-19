@@ -172,12 +172,12 @@ def transform_dialect_interchange(code: str, operation_tag: str, interchange_lis
     return result
 
 
-def transform_dialect_fusion(code: str, operation_tag: str, next_operation_tag: str, tiling_size: list[int],tmp_file_path: str):
+def transform_dialect_fusion(code: str, consumer_tag: str, producer_tag: str, tiling_size: list[int],tmp_file_path: str):
     """Apply the tiling and fusion transformation to the specified operation in the given code.
 
     Args:
         code (str): The code to apply the transformation to.
-        operation_tag (str): The tag of the operation to apply the transformation to.
+        consumer_tag (str): The tag of the operation to apply the transformation to.
         producer_tag (str): the tag of the producer to fuse with
         tiling_size (list[int]): The tiling size to apply.
         tmp_file_path (str): The path to the temporary file to write the code to.
@@ -201,11 +201,11 @@ def transform_dialect_fusion(code: str, operation_tag: str, next_operation_tag: 
     transform_dialect_code = (
         f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
         f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
-        f'    %op_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-        f'    %tiled_op_{operation_tag}, %loops = transform.structured.tile_using_forall %op_{operation_tag} tile_sizes {str(tiling_size)} : (!transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
-        f'    %op_{next_operation_tag} = transform.structured.match attributes{{tag = "{next_operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-        f'    %forall_op_{operation_tag} = transform.get_parent_op %tiled_op_{operation_tag}: (!transform.any_op) -> !transform.any_op\n'
-        f'    transform.structured.fuse_into_containing_op %op_{next_operation_tag} into %forall_op_{operation_tag} : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
+        f'    %op_{consumer_tag} = transform.structured.match attributes{{tag = "{consumer_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+        f'    %tiled_op_{consumer_tag}, %loops:{n_loops} = transform.structured.tile_using_for %op_{consumer_tag} tile_sizes {str(tiling_size)} : (!transform.any_op) -> (!transform.any_op, {r})\n'
+        f'    %op_{producer_tag} = transform.structured.match attributes{{tag = "{producer_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+        f'    %forall_op_{consumer_tag} = transform.get_parent_op %tiled_op_{consumer_tag}: (!transform.any_op) -> !transform.any_op\n'
+        f'    transform.structured.fuse_into_containing_op %op_{producer_tag} into %forall_op_{consumer_tag} : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
         f'    transform.yield\n'
         f'  }}\n'
         f'}}\n'
@@ -553,12 +553,13 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
         new_code = transform_dialect_img2col(code, state.operation_tag, tmp_file)
     elif transformation == 'vectorization':
         # If the operation isn't small enough for vectorization, ignore the transformation
-        op_iter_space = 1
-        for nested_loop in operation_features.nested_loops:
-            op_iter_space *= nested_loop.upper_bound
-        if op_iter_space > cfg.vect_size_limit:
-            print_alert(f"REASON: Too large to vectorize {op_iter_space} > {cfg.vect_size_limit}")
-            return ''
+        if cfg.vect_size_limit > 0:
+            op_iter_space = 1
+            for nested_loop in operation_features.nested_loops:
+                op_iter_space *= nested_loop.upper_bound
+            if op_iter_space > cfg.vect_size_limit:
+                print_alert(f"REASON: Too large to vectorize {op_iter_space} > {cfg.vect_size_limit}")
+                return ''
 
         if use_vectorizer:
             new_code = transform_dialect_vectorise_with_vectorizer(code, state.operation_tag, tmp_file)
@@ -572,11 +573,11 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
             print_alert("REASON: No parameters")
             return ''
         
-        if state.consumer_tag is not None:
+        if state.producer_tag is not None:
             if state.operation_tag not in state.fused_ops:
-                new_code = transform_dialect_fusion(code, state.consumer_tag, state.operation_tag, parameters ,tmp_file)
+                new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
             else:
-                new_code = transform_dialect_fuse_only(code, state.consumer_tag, state.operation_tag, tmp_file)
+                new_code = transform_dialect_fuse_only(code, state.operation_tag, state.producer_tag, tmp_file)
            
         else:
             new_code = code
@@ -712,8 +713,9 @@ def get_ops_by_tags(code: str, operation_tags: list, tmp_file_path: str):
     with open(tmp_file_path, "w") as file:
         file.write(code)
 
+    # FIX: This is a temporary fix to avoid the img2col error
     result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule -o {tmp_file_path}",
+        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule -o {tmp_file_path}.out",
     ).read()
 
     lines = result.split('\n')

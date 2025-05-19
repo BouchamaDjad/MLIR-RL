@@ -81,11 +81,11 @@ class OperationState:
     """The type of the operation (generic, matmul, conv2d, ...)."""
     operation_features: OperationFeatures
     """Features of the operation."""
-    current_consumer: int
+    current_producer: int
     "index of the current consumer"
-    consumer_tag: str
+    producer_tag: str
     "tag of the consumer operation"
-    consumer_features: OperationFeatures
+    producer_features: OperationFeatures
     "Features of the consumer operation"
     fused_ops: set
     "fused ops"
@@ -101,6 +101,8 @@ class OperationState:
     """Execution time of the operation in nanoseconds."""
     root_exec_time: int
     """Execution time of the operation in nanoseconds without any transformation."""
+    empty_schedule: bool
+    """is True if the model has not chosen to apply any transformation on any operation """
     transformation_history: list[tuple[str, list[int]]]
     """List of transformations with their parameters applied to the operation."""
     cummulative_reward: float

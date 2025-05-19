@@ -4,7 +4,7 @@
     "max_num_load_store_dim": 7,
     "num_tile_sizes": 7,
     "num_transformations": 7,
-    "vect_size_limit": 999999999999999999999,
+    "vect_size_limit": 0,
     "use_bindings": false,
     "use_vectorizer": true,
     "data_format": "json",

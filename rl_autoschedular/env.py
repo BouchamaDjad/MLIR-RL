@@ -352,9 +352,9 @@ class Env:
                     operation_index=state.operation_index,
                     operation_type='conv_2d+img2col',  # The operation type changes
                     operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
-                    current_consumer = 0,
-                    consumer_tag = state.consumer_tag,
-                    consumer_features = state.consumer_features,
+                    current_producer = 0,
+                    producer_tag = state.producer_tag,
+                    producer_features = state.producer_features,
                     fused_ops = state.fused_ops,
                     transformed_code=state.transformed_code,
                     actions=state.actions,
@@ -370,7 +370,7 @@ class Env:
                 # else:
                 #     transformed_code = ""
 
-            elif transformed_code and transformation == "fusion":
+            elif transformed_code and (transformation == "fusion" or transformation == 'parallelization'):
 
                 # TODO: Look into rebuilding the operation features
                 
@@ -392,22 +392,21 @@ class Env:
                                transformed_code = new_code
                                
                 if transformation =='fusion':
-                    state.fused_ops.update([state.operation_tag, state.consumer_tag])
-                    if state.consumer_features is not None and (state.current_consumer + 1) < len(state.operation_features.consumers):
+                    state.fused_ops.update([state.operation_tag, state.producer_tag])
+                    if state.producer_features is not None and (state.current_producer + 1) < len(state.operation_features.producers):
 
-                    state.current_producer += 1
-                    state.producer_tag = state.operation_features.producers[state.current_producer]
-                    state.producer_features = bench_data.operations[state.producer_tag]
+                        state.current_producer += 1
+                        state.producer_tag = state.operation_features.producers[state.current_producer]
+                        state.producer_features = bench_data.operations[state.producer_tag]
 
-
-                else:
-                    state.producer_tag = None
+                    else:
+                        state.producer_tag = None
                 
                 else: # parall
                     state.fused_ops.update([state.operation_tag])
             
             # TODO: maybe create a new set for tiled ops
-            elif transformed_code and transformation in ['parallelization',"tiling"]:
+            elif transformed_code and transformation in ["tiling"]:
                 state.fused_ops.update([state.operation_tag])
             
 

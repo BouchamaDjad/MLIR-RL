@@ -60,9 +60,9 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
 
     # for i in tqdm(range(len_trajectory)):
     for i in range(len_trajectory):
-        *x,action_mask = batch_obs[0] # bricole
+        x = batch_obs[0] # bricole
         with torch.no_grad():
-            action_index, action_log_p, values, entropy = model.sample(x,action_mask)
+            action_index, action_log_p, values, entropy = model.sample(x)
             # TODO: Look into removing the following code (repetition of model.sample call for no obvious reason )
             # new_action_index, new_action_log_p, new_values, new_entropy = model.sample(x, actions=action_index)
             # assert (action_index == new_action_index), 'check the get_p yerham babak'
@@ -103,7 +103,7 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
                 if neptune_logs is not None:
                     neptune_logs['train/final_speedup'].append(speedup_metric)
                     neptune_logs['train/cummulative_reward'].append(final_state.cummulative_reward)
-                    neptune_logs[f'train/{final_state.bench_name}_speedup'].append(speedup_metric)
+                    neptune_logs[f'train/{env.envs[0].bench_index}_speedup'].append(speedup_metric)
 
                 # running_return_stats.add(final_state.raw_operation, speedup_metric)
 
@@ -111,8 +111,8 @@ def collect_trajectory(len_trajectory: int, model: Model, env: ParallelEnv, devi
         batch_obs = batch_next_obs
 
     with torch.no_grad():
-        *x,action_mask = batch_obs[0]
-        _, _, next_value, _ = model.sample(x,action_mask)
+        x = batch_obs[0]
+        _, _, next_value, _ = model.sample(x)
 
     stored_value_tensor = torch.concatenate(stored_value)
     stored_action_log_p_tensor = torch.concatenate(stored_action_log_p)
@@ -314,9 +314,9 @@ def ppo_update(trajectory: Trajectory, model: Model, optimizer: torch.optim.Opti
             
             new_action_log_p, new_values, entropy = [], [], []
             for single_x,single_action_index in zip(x,action_index):
-                *obs, action_mask = single_x
+                x = single_x
                 
-                _, n_action_log_p, value, ent = model.sample(obs, action_mask, actions=[single_action_index])
+                _, n_action_log_p, value, ent = model.sample(x, actions=[single_action_index])
                 
                 new_action_log_p.append(n_action_log_p)
                 new_values.append(value)
@@ -393,11 +393,11 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
         # obs = torch.cat(obs).to(device)
 
         while True:
-            *obs, action_mask = obs[0]
+            x = obs[0]
 
             with torch.no_grad():
                 # Select the action using the model
-                action, _, _, _ = model.sample(obs, action_mask)
+                action, _, _, _ = model.sample(x)
 
             # Apply the action and get the next state
             next_obs, reward, terminated, next_state, final_state = env.step(state, action)
@@ -412,7 +412,7 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
                 print('Speedup:', speedup_metric)
 
                 if neptune_logs is not None:
-                    neptune_logs[f'eval/{bench_name}_speedup'].append(speedup_metric)
+                    neptune_logs[f'eval/{env.envs[0].bench_index}_speedup'].append(speedup_metric)
                     neptune_logs['eval/final_speedup'].append(speedup_metric)
                     speedup_values.append(speedup_metric)
 

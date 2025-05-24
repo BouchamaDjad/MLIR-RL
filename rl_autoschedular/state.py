@@ -121,3 +121,22 @@ class LoopFeatures:
     """List of store accesses where each store is represented by the list of access arguments."""
     nested_loops: list[NestedLoopFeatures]
     """List of nested loops where each loop is represented by the NestedLoopFeatures dataclass."""
+    
+    
+@dataclass
+class ObservationFeatures:
+    """ Dataclass to store the observation informations needed to pass into the model """
+    consumer_tree : LoopNode
+    """Tree representation of the consumer operation (current)"""
+    producer_tree : LoopNode
+    """Tree representation of the producer operation"""
+    action_mask : list[int]
+    """action mask for the current state"""
+    action_history: list[int]
+    """action history for the current operation"""
+
+    
+    
+    
+    
+    

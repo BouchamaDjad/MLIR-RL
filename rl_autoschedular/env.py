@@ -8,7 +8,7 @@ import os
 import string
 from typing import Optional, Literal
 from rl_autoschedular import config as cfg
-from rl_autoschedular.state import OperationState, BenchmarkFeatures
+from rl_autoschedular.state import OperationState, BenchmarkFeatures, ObservationFeatures
 from rl_autoschedular.observation import (
     extract_bench_features_from_file,
     extract_bench_features_from_code,
@@ -720,6 +720,28 @@ class Env:
         obs[1:cfg.max_num_loops + 1] = obs[1:cfg.max_num_loops + 1] / 100
 
         return obs
+    
+    
+    def get_op_type_encoding(self,op_type:str):
+        if op_type == 'matmul':
+            operation_type_int = 1
+        elif 'conv_2d' in op_type:
+            operation_type_int = 2
+        elif op_type == 'pooling':
+            operation_type_int = 3
+        elif op_type == 'add':
+            operation_type_int = 4
+        elif op_type == 'generic':
+            operation_type_int = 5
+        elif op_type == 'conv_2d':
+            operation_type_int = 6
+        elif op_type == 'fill':
+            operation_type_int = 7
+            
+        else:
+            operation_type_int = 8
+            
+        return operation_type_int
 
     def get_obs(self, state: OperationState):
         """Build the obervation vector for the input state.
@@ -732,8 +754,13 @@ class Env:
         """
 
         op_features_vector = build_op_features_vector(state.operation_features)
+        
+        
+        operation_type_int = self.get_op_type_encoding(state.operation_type)
+        
+        op_features_vector = np.concatenate(([operation_type_int], op_features_vector))
 
-        # action_history = state.actions.reshape(-1) # TODO: we have to see how to re-incorporate it
+        action_history = state.actions.reshape(-1) # TODO: we have to see how to re-incorporate it
         action_mask = state.actions_mask
 
         # obs = np.concatenate((
@@ -749,12 +776,27 @@ class Env:
         
         if state.producer_tag != None:
             prod_features_vector = build_op_features_vector(state.producer_features)
-            prod_tree = build_loop_tree_from_ast(state.producer_features.nested_loops,prod_features_vector)
-        else:
             
+            prod_raw_operation = state.producer_features.raw_operation
+            producer_type = self.get_operation_type(prod_raw_operation)
+            producer_type_int = self.get_op_type_encoding(producer_type)
+            
+            prod_features_vector = np.concatenate(([producer_type_int], prod_features_vector))
+            prod_tree = build_loop_tree_from_ast(state.producer_features.nested_loops,prod_features_vector)
+            
+            
+        else:
+            producer_type_int = 0
             prod_tree = None
+            
+        observation = ObservationFeatures(
+            consumer_tree = curr_tree,
+            producer_tree = prod_tree,
+            action_mask = action_mask,
+            action_history = action_history
+        )
 
-        return curr_tree,prod_tree,action_mask
+        return observation
 
     def initialize_action_mask(self, num_loops: int, operation_type: str):
         """Initialize the action mask for a specified number of loops and operation type.
@@ -859,9 +901,9 @@ class Env:
             if transformation == 'parallelization':
                 actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
             if transformation == 'tiling':
-                actions_mask[:TP_BEGIN] = [True, False, True, True, False, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, True, False, False, False]
             if transformation == 'interchange':
-                actions_mask[:TP_BEGIN] = [True, False, False, True, False, False, True]
+                actions_mask[:TP_BEGIN] = [True, False, False, True, False, False, False]
 
         elif state.operation_type in ["generic", "func.call"]:
             if transformation == 'parallelization':
@@ -871,7 +913,7 @@ class Env:
                 actions_mask[:TP_BEGIN] = [True, True, True, True, False, False, True]
             if transformation == 'tiling':
                 # NOTE: actions_mask[:NUM_TRANSFORMATIONS] = [True, False, False, False, True, False, False]
-                actions_mask[:TP_BEGIN] = [True, True, True, True, False, False, True]
+                actions_mask[:TP_BEGIN] = [True, True, True, True, False, False, False]
 
         # TODO: look into the possibilty of removing this else branch
         else:

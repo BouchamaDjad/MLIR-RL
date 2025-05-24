@@ -202,7 +202,7 @@ def transform_dialect_fusion(code: str, consumer_tag: str, producer_tag: str, ti
         f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
         f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
         f'    %op_{consumer_tag} = transform.structured.match attributes{{tag = "{consumer_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-        f'    %tiled_op_{consumer_tag}, %loops:{n_loops} = transform.structured.tile_using_for %op_{consumer_tag} tile_sizes {str(tiling_size)} : (!transform.any_op) -> (!transform.any_op, {r})\n'
+        f'    %tiled_op_{consumer_tag}, %loops = transform.structured.tile_using_forall %op_{consumer_tag} tile_sizes {str(tiling_size)} : (!transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
         f'    %op_{producer_tag} = transform.structured.match attributes{{tag = "{producer_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
         f'    %forall_op_{consumer_tag} = transform.get_parent_op %tiled_op_{consumer_tag}: (!transform.any_op) -> !transform.any_op\n'
         f'    transform.structured.fuse_into_containing_op %op_{producer_tag} into %forall_op_{consumer_tag} : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)\n'

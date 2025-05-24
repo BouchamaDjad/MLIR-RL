@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.distributions import Categorical
 from typing import Optional
 from rl_autoschedular import config as cfg
-from rl_autoschedular.state import LoopNode
+from rl_autoschedular.state import LoopNode, ObservationFeatures
 
 def initialization_function_xavier(x):
     return nn.init.xavier_uniform_(x)
@@ -206,6 +206,7 @@ class HiearchyModel(nn.Module):
         L = cfg.max_num_loops
         D = cfg.max_num_load_store_dim
         SD = cfg.max_num_stores_loads
+        
         self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate + 6 # TODO: rechange it once the observation vector is finalized
         
         self.comp_embed_layer_sizes=[600, 350, 512, 512] # 411 = 1 + L + L * D * SD + L * D + 5 + 6
@@ -239,7 +240,7 @@ class HiearchyModel(nn.Module):
         self.ELU = nn.ELU()
         
         self.comps_lstm = nn.LSTM(
-            411, embedding_size, batch_first=True
+            412, embedding_size, batch_first=True
         )
         
         # LSTM to encode child loop levels
@@ -248,7 +249,7 @@ class HiearchyModel(nn.Module):
         )
         
         self.roots_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], self.input_dim, batch_first=True
+            self.comp_embed_layer_sizes[-1], self.input_dim - 140, batch_first=True # 140 because of the action history
         )
         
         
@@ -277,7 +278,20 @@ class HiearchyModel(nn.Module):
         self.tiling_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no tiling
         self.parall_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no parallelizattion
         self.fusion_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no fusion
-    
+
+        bias_values = [0.0, 0.3, -0.2, -0.3, 0.0, 0.0, 0.4]
+
+        
+        self.transform_bias = nn.Parameter(torch.tensor([
+            0.0, #no transform
+            0.0, #parall
+            0.0, #tiling
+            0.0, #interchange
+            0.0, #vect 
+            0.0, #img2col
+            0.0 #fusion
+        ], dtype=torch.float32))
+
     
     def get_hidden_state(self, node):
         if node is not None and node.children != []:
@@ -324,7 +338,7 @@ class HiearchyModel(nn.Module):
 
         return x
 
-    def sample(self, obs: tuple[LoopNode, LoopNode], action_mask: np.array, actions: Optional[list[tuple[str, list[int]]]] = None):
+    def sample(self, obs: ObservationFeatures, actions: Optional[list[tuple[str, list[int]]]] = None):
         """Sample an action from the model.
 
         Args:
@@ -338,7 +352,7 @@ class HiearchyModel(nn.Module):
             torch.Tensor: resulting entropy.
         """
         
-        current_tree, previous_tree = obs
+        current_tree, previous_tree, action_mask, action_history = obs.consumer_tree, obs.producer_tree, obs.action_mask, obs.action_history
         
         current_obs = self.get_hidden_state(current_tree)
         previous_obs = self.get_hidden_state(previous_tree)
@@ -351,6 +365,11 @@ class HiearchyModel(nn.Module):
         # print('roots_h_n shape:',roots_h_n.shape)
         
         x = roots_h_n[0]
+        
+        action_history = torch.tensor(action_history, dtype=torch.float32).unsqueeze(0)
+        
+        x = torch.cat([x,action_history],1)
+    
         
         *leading_dims, _ = x.shape
 
@@ -387,7 +406,7 @@ class HiearchyModel(nn.Module):
         # _, ( embedding,  _) = self.lstm(input) # output shape = (batch, seq_lenght, hidden) input shape = (batch, seq, input size)
 
         x1 = self.backbone(x)
-        transformation_logits = self.transformation_selection(x1)
+        transformation_logits = self.transformation_selection(x1) + self.transform_bias
         interchange_logits = self.interchange_fc(x1)
         tiling_logits = self.tiling_fc(x1)
         parall_logits = self.parall_fc(x1)

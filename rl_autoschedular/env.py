@@ -60,6 +60,7 @@ def train_eval_split(eval_size: float = 0.2):
     )
 
     eval_env = ParallelEnv(
+        env_type='eval',
         env_json_data = eval_env_json_data,
         num_env=1,
         reset_repeat=1,
@@ -79,13 +80,16 @@ class Env:
     """The number of times to repeat the reset function."""
     step_repeat: int
     """The number of times to repeat the step function."""
+    env_type: Literal['eval', 'train'] = 'train'
+    """The type of environement."""
     tmp_file: str
     """The temporary file to store the intermediate representations."""
 
-    def __init__(self, reset_repeat: int = 1, step_repeat: int = 1, tmp_file: Optional[str] = None, env_json_data: Optional[list[tuple[str, dict]]] = None):
+    def __init__(self, env_type: Literal['eval', 'train'] = 'train', reset_repeat: int = 1, step_repeat: int = 1, tmp_file: Optional[str] = None, env_json_data: Optional[list[tuple[str, dict]]] = None):
         """Initialize the environment.
 
         Args:
+            env_type (str): The type of environement. Either eval or train. Defaults to train.
             reset_repeat (int): The number of times to repeat the reset function. Defaults to 1.
             step_repeat (int): The number of times to repeat the step function. Defaults to 1.
             tmp_file (Optional[str]): The temporary file to store the intermediate representations. Defaults to None.
@@ -94,6 +98,8 @@ class Env:
         # Generate a random file to be used in order to apply the transformations and evaluate the code
         # This is done in order to enable having multiple experiments at the same time, by letting each
         # experiment use a separate unique file to read and write intermediate representations
+        self.env_type = env_type
+
         random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
         if tmp_file is None:
             tmp_file = f"tmp/{random_str}.mlir"
@@ -514,21 +520,26 @@ class Env:
         else:
             # Switch to the Next operation
             if not trans_failed and state.operation_index < len(bench_data.operation_tags) - 1:
-                
-                reward, new_exec_time, execution_error = self.evaluate_step(transformed_code, state, transformation, parameters, reward)              
-                # TODO: see if this could be usefull
-                # if execution_error:
-                #     trans_failed = True
+
+                if self.env_type != 'eval':                
+                    reward, new_exec_time, execution_error = self.evaluate_step(transformed_code, state, transformation, parameters, reward)              
+                    # TODO: see if this could be usefull
+                    if execution_error:
+                        trans_failed = True
 
                 speedup_metric = state.exec_time / new_exec_time
                 print("\n")
                 print(state.transformation_history + [(transformation, parameters)])
+                print('-' * 30)
+                print(f"Operation: {self.bench_index} - {state.operation_tag}")
+                print(state.transformation_history)
                 print('Relative speedup:', speedup_metric)
                 print('root Exec time:', state.root_exec_time * 10**-9, 's')
                 print('Old Exec time:', state.exec_time * 10**-9, 's')
                 print('New Exec time:', new_exec_time * 10**-9, 's')
                 print(f"reward: {reward}")
                 print(f"cummulative reward: {state.cummulative_reward + reward}")
+                print('-' * 30)
 
                 # TODO: Check what is happening here
                 # Re-extract operations data from the new code
@@ -819,7 +830,7 @@ class Env:
             actions_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
         
         if transformation == "fusion":
-            actions_mask[:TP_BEGIN] = [False, False, False, False, True, False, False]
+            actions_mask[:TP_BEGIN] = [True, False, False, False, True, False, False]
 
         if state.operation_type == "pooling" or state.operation_type == "conv_2d":
             if transformation == 'parallelization':
@@ -1093,10 +1104,11 @@ class ParallelEnv:
     envs: list[Env]
     """list of environments."""
 
-    def __init__(self, num_env: int = 1, reset_repeat: int = 1, step_repeat: int = 1, env_json_data: list[tuple[str, dict]] = None):
+    def __init__(self, env_type: Literal['eval', 'train'] = 'train', num_env: int = 1, reset_repeat: int = 1, step_repeat: int = 1, env_json_data: list[tuple[str, dict]] = None):
         """Initialize parallel environments.
 
         Args:
+            env_type (str): The type of environement. Either eval or train. Defaults to train.
             num_env (int): number of environments. Defaults to 1.
             reset_repeat (int): The number of times to repeat the reset function. Defaults to 1.
             step_repeat (int): The number of times to repeat the step function. Defaults to 1.
@@ -1105,6 +1117,7 @@ class ParallelEnv:
         self.num_env = num_env
         self.envs = [
             Env(
+                env_type = env_type,
                 env_json_data=env_json_data,
                 reset_repeat=reset_repeat,
                 step_repeat=step_repeat

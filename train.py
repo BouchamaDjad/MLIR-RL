@@ -38,6 +38,7 @@ else:
     )
 
     eval_env = ParallelEnv(
+        env_type='eval',
         num_env=1,
         reset_repeat=1,
         step_repeat=1
@@ -63,6 +64,9 @@ optimizer = torch.optim.Adam(
 # Set neptune logs if enabled
 neptune_logs = init_neptune(['hierchical', 'sparse_reward'] + cfg.tags) if cfg.logging else None
 
+run_id = neptune_logs['sys/id'].fetch()
+print_info(f'Run id: {run_id}')
+
 # Start training
 print_info('Start training ... ')
 tqdm_range = tqdm(range(cfg.nb_iterations), desc='Main loop')
@@ -87,7 +91,7 @@ for step in tqdm_range:
         neptune_logs=neptune_logs
     )
 
-    torch.save(model.state_dict(), 'models/ppo_model.pt')
+    torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
 
     if step % 5 == 0:
         evaluate_benchmark(
@@ -98,7 +102,7 @@ for step in tqdm_range:
         )
 
         if cfg.logging:
-            neptune_logs["params"].upload_files(['models/ppo_model.pt'])
+            neptune_logs["params"].upload_files([f'models/ppo_model._{run_id}pt'])
 
 
 # Stop logs if enabled

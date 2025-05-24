@@ -18,7 +18,7 @@
     "entropy_coef": 0.01,
     "lr": 0.001,
     "truncate": 5,
-    "json_file": "t.json",
+    "json_file": "./data/nn/final-operation-sequence-5.json",
     "tags": ["nn"],
     "logging": true
 }

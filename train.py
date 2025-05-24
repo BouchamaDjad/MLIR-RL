@@ -63,14 +63,9 @@ optimizer = torch.optim.Adam(
 # Set neptune logs if enabled
 neptune_logs = init_neptune(['hierchical', 'sparse_reward','all','no_bias','type_op','action history'] + cfg.tags) if cfg.logging else None
 
-
 # get run id 
-id_file = './models/run_id.txt'
-with open(id_file, "r") as f:
-    run_id = int(f.read().strip())
-    
-with open(id_file, "w") as f:
-    f.write(str(run_id + 1))
+run_id = neptune_logs["sys/id"].fetch()
+print_info(f"Run id: {run_id}")
 
 # Start training
 print_info('Start training ... ')

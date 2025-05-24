@@ -733,13 +733,13 @@ class Env:
             operation_type_int = 4
         elif op_type == 'generic':
             operation_type_int = 5
-        elif op_type == 'conv_2d':
-            operation_type_int = 6
+        # elif op_type == 'conv_2d':
+        #     operation_type_int = 6
         elif op_type == 'fill':
-            operation_type_int = 7
+            operation_type_int = 6
             
         else:
-            operation_type_int = 8
+            operation_type_int = 7
             
         return operation_type_int
 

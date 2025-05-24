@@ -289,7 +289,7 @@ class HiearchyModel(nn.Module):
             0.0, #interchange
             0.0, #vect 
             0.0, #img2col
-            0.0 #fusion
+            0.0  #fusion
         ], dtype=torch.float32))
 
     

@@ -102,7 +102,7 @@ for step in tqdm_range:
         )
 
         if cfg.logging:
-            neptune_logs["params"].upload_files([f'models/ppo_model._{run_id}pt'])
+            neptune_logs["params"].upload_files([f'models/ppo_model_{run_id}.pt'])
 
 
 # Stop logs if enabled

@@ -520,6 +520,13 @@ class Env:
         else:
             # Switch to the Next operation
             if not trans_failed and state.operation_index < len(bench_data.operation_tags) - 1:
+                new_exec_time = state.exec_time
+
+                print("\n")
+                print(state.transformation_history + [(transformation, parameters)])
+                print('-' * 30)
+                print(f"Operation: {self.bench_index} - {state.operation_tag}")
+                print(state.transformation_history)
 
                 if self.env_type != 'eval':                
                     reward, new_exec_time, execution_error = self.evaluate_step(transformed_code, state, transformation, parameters, reward)              
@@ -527,16 +534,13 @@ class Env:
                     if execution_error:
                         trans_failed = True
 
-                speedup_metric = state.exec_time / new_exec_time
-                print("\n")
-                print(state.transformation_history + [(transformation, parameters)])
-                print('-' * 30)
-                print(f"Operation: {self.bench_index} - {state.operation_tag}")
-                print(state.transformation_history)
-                print('Relative speedup:', speedup_metric)
-                print('root Exec time:', state.root_exec_time * 10**-9, 's')
-                print('Old Exec time:', state.exec_time * 10**-9, 's')
-                print('New Exec time:', new_exec_time * 10**-9, 's')
+                    speedup_metric = state.exec_time / new_exec_time
+
+                    print('Relative speedup:', speedup_metric)
+                    print('root Exec time:', state.root_exec_time * 10**-9, 's')
+                    print('Old Exec time:', state.exec_time * 10**-9, 's')
+                    print('New Exec time:', new_exec_time * 10**-9, 's')
+                
                 print(f"reward: {reward}")
                 print(f"cummulative reward: {state.cummulative_reward + reward}")
                 print('-' * 30)

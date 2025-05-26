@@ -615,6 +615,7 @@ class Env:
                     next_state.operation_index = 0
                     next_state.step_count += 1
                     next_state.transformed_code = transformed_code
+                    next_state.exec_time = new_exec_time
 
             else:
                 next_state = state

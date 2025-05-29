@@ -517,8 +517,8 @@ def extract_bench_features_from_code(bench_name: str, code: str, root_execution_
     )
     raw_ast_info = result.stdout.decode('utf-8')
     
-    with open('./ast.txt', 'w') as file:
-        file.write(raw_ast_info)
+    # with open('./ast.txt', 'w') as file:
+    #     file.write(raw_ast_info)
 
     return __extract_bench_features_from_ast_result(bench_name, raw_ast_info, root_execution_time, execution_time)
 
@@ -992,13 +992,105 @@ def transform_wrapper(operation, maps: Optional[str]=None, additional_function: 
 
     return code
 
-def __inline(code: str, tmp_file_path: str):
+def main_wrapper(operation, maps: Optional[str]=None, additional_function: Optional[str] = None):
+    
+    ins_outs_pattern = "(?:ins|outs)\s*\(([^())]+)\)"
+    fields = re.findall(ins_outs_pattern, operation)
+
+    if fields == [] and additional_function is not None:
+
+        shape_fields = re.findall("(?:\(([^(]+)\))(?:\s*\->\s*([^(]+))", operation)[0]
+        
+        shapes = []
+        for f in shape_fields[0].split(","):
+            shapes.append(f.strip())
+
+        args = re.findall("(?:@\w+\(([^)]+))",operation)[0].split(',')
+
+        args = [arg.strip() for arg in args]
+        shapes = [shape.strip() for shape in shapes]
+
+        args, shapes = __remove_duplicate_args(args, shapes)
+
+        shapes.append(shape_fields[1])
+
+    else:
+        args, shapes = [], []
+        for field in fields:
+            args_field, shapes_field = field.split(':')
+            args   += args_field.split(',')
+            shapes += shapes_field.split(',')
+
+        args = [arg.strip() for arg in args]
+        shapes = [shape.strip() for shape in shapes]
+
+        args, shapes = __remove_duplicate_args(args, shapes)
+
+    #############################################################
+    dims = []
+
+    for shape in shapes:
+    
+        if shape.startswith("tensor"):
+            arg_dims = list(map(int,  re.findall(r'\d+',  shape[7:-5])))
+            dims.append( arg_dims )
+    
+        else:
+            dims.append( -1 )
+
+    #############################################################
+    last_dim = list(map(str,dims[-1]))
+
+    # All code:
+    code = ""
+    if maps is not None:
+        code += f"{maps}\n"
+    
+    code += 'module attributes {torch.debug_module_name = "Net"} {\n'
+    code += f'memref.global "private" constant @my_global_memref : memref<{"x".join(last_dim)}xf32>\n'
+    code += "func.func private @nanoTime() -> i64 attributes { llvm.emit_c_interface }\n"
+    code += "func.func private @printI64(i64)\n"
+    code += "func.func private @printF32(f32)\n"
+    code += "func.func private @printNewline()\n"
+    code += "\n"
+    code += f"{additional_function}" if additional_function else ''
+    code += "\n"
+    code += f"func.func @main({', '.join([f'{arg}: {shape}' for arg,shape in zip(args, shapes) ])}) -> i64 attributes {{ llvm.emit_c_interface }} {{\n"
+    
+    # code += "    %c1 = arith.constant 1: index\n"
+    # code += "    %c0 = arith.constant 0 : index\n"
+    # code += "    %n = arith.constant 2: index\n"
+    # code += "    %init_delta = arith.constant 0 : i64\n"
+    
+    code += " \n"
+    # code += "    %final_delta = scf.for %i = %c0 to %n step %c1 iter_args(%d = %init_delta) -> (i64) {\n"
+    code += "    %t0 = func.call @nanoTime() : () -> (i64)\n"
+    code += f"    %outputmain = {operation} \n"
+    code += "    %t = func.call @nanoTime() : () -> (i64)\n"
+    code += "    %delta = arith.subi %t, %t0 : i64\n"
+    code += "    //func.call @printI64(%delta) : (i64) -> ()\n"
+    code += f"    %memref = bufferization.to_memref %outputmain : memref<{'x'.join(last_dim)}xf32>\n"
+    code += f"    %global = memref.get_global @my_global_memref : memref<{'x'.join(last_dim)}xf32>\n"
+    code += f"    memref.copy %memref, %global : memref<{'x'.join(last_dim)}xf32> to memref<{'x'.join(last_dim)}xf32>\n"
+    code += "    func.call @printNewline() : () -> ()\n"
+    # code += "    scf.yield %delta : i64\n"
+    # code += "}\n"
+    code += "    return %delta : i64\n"
+    code += "}\n"
+    code += "}\n"
+
+    return code
+
+def inline(code: str, tmp_file_path: str):
     # Write the MLIR code to a temporary file
     with open(tmp_file_path, "w") as file:
         file.write(code)
 
     # Lower the Linalg dialect code to Affine dialect
     out = os.popen(f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt --inline {tmp_file_path}").read()
+
+    # with open(f"{tmp_file_path}.out","r") as f:
+    #     out = f.read() 
 
     if out != '':
         return out

@@ -1,5 +1,5 @@
 import tensorflow as tf
-from log import print_info
+from ..utils.log import print_info
 import os
 
 

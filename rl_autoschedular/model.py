@@ -279,18 +279,11 @@ class HiearchyModel(nn.Module):
         self.parall_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no parallelizattion
         self.fusion_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no fusion
 
+        no_bias = [0.0] * cfg.num_transformations
+
         bias_values = [0.0, 0.3, -0.2, -0.3, 0.0, 0.0, 0.4]
 
-        
-        self.transform_bias = nn.Parameter(torch.tensor([
-            0.0, #no transform
-            0.0, #parall
-            0.0, #tiling
-            0.0, #interchange
-            0.0, #vect 
-            0.0, #img2col
-            0.0  #fusion
-        ], dtype=torch.float32))
+        self.transform_bias = nn.Parameter(torch.tensor(no_bias, dtype=torch.float32))
 
     
     def get_hidden_state(self, node):

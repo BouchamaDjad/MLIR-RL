@@ -1,4 +1,6 @@
 import os
+import re
+from sys import stderr
 import numpy as np
 from mlir.ir import Context, Module
 from mlir.execution_engine import ExecutionEngine, ctypes
@@ -7,18 +9,16 @@ from mlir.passmanager import PassManager
 from typing import Union, Optional
 import multiprocessing
 from rl_autoschedular import config as cfg
-
+from utils.log import print_error
 
 # ================================== Evaluation Functions (Python Bindings) ==================================
 
-# TODO: Adapt this function to be able to run code without benchmark name
-def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional[float], Union[Exception, bool]]:
+def evaluate_code_with_bindings(code: str) -> tuple[Optional[int], bool]:
     """Lowers and runs the given MLIR code using Python bindings, then returns the execution time and assertion
     result (if the executed code returns the correct result).
 
     Args:
         code (str): The MLIR code to run.
-        function_name (str): The name of the function to run.
 
     Returns:
         Optional[float]: the execution time in seconds.
@@ -27,9 +27,16 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
     pass_pipeline = """builtin.module(
         loop-invariant-code-motion,
         canonicalize,
+        eliminate-empty-tensors,
+        empty-tensor-to-alloc-tensor,
+        one-shot-bufferize{
+            bufferize-function-boundaries
+            function-boundary-type-conversion=identity-layout-map
+        },
         convert-vector-to-scf,
         convert-linalg-to-loops,
         buffer-deallocation-pipeline,
+        convert-bufferization-to-memref,
         scf-forall-to-parallel,
         convert-scf-to-openmp,
         expand-strided-metadata,
@@ -40,6 +47,7 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
         convert-openmp-to-llvm,
         convert-vector-to-llvm,
         convert-math-to-llvm,
+        finalize-memref-to-llvm,
         convert-func-to-llvm,
         convert-index-to-llvm,
         convert-arith-to-llvm,
@@ -50,80 +58,36 @@ def evaluate_code_with_bindings(code: str, function_name: str) -> tuple[Optional
         cse
     )"""
 
-    pass_pipeline = """builtin.module(
-    -loop-invariant-code-motion
-    -canonicalize
-    -eliminate-empty-tensors
-    -empty-tensor-to-alloc-tensor
-    -one-shot-bufferize='bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map'
-    -convert-vector-to-scf
-    -convert-linalg-to-loops
-    -buffer-deallocation-pipeline
-    -scf-forall-to-parallel
-    -convert-scf-to-openmp
-    -expand-strided-metadata
-    -finalize-memref-to-llvm
-    -convert-scf-to-cf
-    -lower-affine
-    -convert-arith-to-llvm
-    -convert-openmp-to-llvm
-    -convert-vector-to-llvm
-    -convert-cf-to-llvm
-    -convert-func-to-llvm
-    -convert-math-to-llvm
-    -finalize-memref-to-llvm
-    -reconcile-unrealized-casts
-    -canonicalize
-    -cse
-    )"""
-
     with Context():
         module = Module.parse(code)
         pm = PassManager.parse(pass_pipeline)
         pm.run(module.operation)
+    
     execution_engine = ExecutionEngine(
         module,
         shared_libs=os.getenv("MLIR_SHARED_LIBS", "").split(","),
     )
 
-    full_function_name = os.path.join(
-        cfg.benchmarks_folder_path,
-        function_name + ".mlir"
-    )
-    with open(full_function_name, "r") as f:
-        original_code = f.read()
+    inputs = __create_inputs(code)
 
-    np_file = np.load(full_function_name + ".npz")
-    expected: np.ndarray = np.load(full_function_name + ".npy")
-
-    args_names: list[str] = sorted(
-        np_file.files,
-        key=lambda s: original_code.index(s)
-    )
-    args_map: dict[str, np.ndarray] = {arr: np_file[arr] for arr in args_names}
     args = []
-    for arg_name in args_names:
+    for input_arg in inputs:
         args.append(ctypes.pointer(ctypes.pointer(
-            get_ranked_memref_descriptor(args_map[arg_name])
+            get_ranked_memref_descriptor(input_arg)
         )))
 
     delta_arg = (ctypes.c_int64 * 1)(0)
     args.append(delta_arg)
 
     try:
-        execution_engine.invoke("main", *args)
-        execution_engine.invoke("main", *args)
+        [execution_engine.invoke("main", *args) for _ in range(2)]
     except Exception as e:
-        return None, e
-    actual = args_map[args_names[-1]]
-    if expected.dtype == np.complex128:
-        actual = actual.view(np.complex128).squeeze(len(actual.shape) - 1)
-    assertion = np.allclose(actual, expected)
+        print(f"{e.with_traceback()}",file=stderr)
+        return None, False
 
-    return delta_arg[0], assertion
+    return delta_arg[0], True
 
-
-def evaluate_code_with_bindings_wrapper(code: str, function_name: str, exec_times, assertions):
+def evaluate_code_with_bindings_wrapper(code: str, exec_times, assertions):
     """Wrapper function for evaluate_code_with_bindings to be used in multiprocessing.
 
     Args:
@@ -132,12 +96,11 @@ def evaluate_code_with_bindings_wrapper(code: str, function_name: str, exec_time
         exec_times (list): A list to store the execution times.
         assertions (list): A list to store the assertion results
     """
-    exec_time, assertion = evaluate_code_with_bindings(code, function_name)
+    exec_time, assertion = evaluate_code_with_bindings(code)
     exec_times.append(exec_time)
     assertions.append(assertion)
 
-
-def evaluate_code_with_bindings_and_timeout(code: str, function_name: str, timeout: Optional[float] = None):
+def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float]) -> tuple[Optional[int], Union[Exception, bool]]:
     """Evaluates the given MLIR code using Python bindings with a timeout.
 
     Args:
@@ -152,7 +115,7 @@ def evaluate_code_with_bindings_and_timeout(code: str, function_name: str, timeo
     manager = multiprocessing.Manager()
     exec_times = manager.list()
     assertions = manager.list()
-    process = multiprocessing.Process(target=evaluate_code_with_bindings_wrapper, args=(code, function_name, exec_times, assertions))
+    process = multiprocessing.Process(target=evaluate_code_with_bindings_wrapper, args=(code, exec_times, assertions))
     process.start()
     process.join(timeout)
 
@@ -164,8 +127,7 @@ def evaluate_code_with_bindings_and_timeout(code: str, function_name: str, timeo
         return None, False
     else:
         # The function completed within the timeout
-        return exec_times[0], assertions[0]
-
+        return exec_times[0] if exec_times else 0, assertions[0] if assertions else False
 
 # ================================== Evaluation Functions (MLIR CPU Runner) ==================================
 
@@ -263,3 +225,36 @@ def evaluate_code_with_cmd_and_timeout(code: str, tmp_file_path: str, timeout: O
     else:
         # The function completed within the timeout
         return exec_times[0], assertions[0]
+
+
+def __create_inputs(code) -> list[np.ndarray]:
+    main_pattern = r"func.func @main\(([^)]+)\)"
+    main_params = re.search(main_pattern, code).group(1)
+    main_shapes = [arg.split(':')[1].strip() for arg in main_params.split(',')]
+
+    inputs: list[np.ndarray] = []
+    for shape in main_shapes:
+        assert shape.startswith('memref<') or shape.startswith('tensor<'), f'unexpected shape {shape}'
+        *np_shape, dtype = shape.replace('memref<', '').replace('tensor<', '').replace('>', '').split('x')
+        assert dtype[0] in ['f', 'i'] and dtype[1:] in ['32', '64'], f'unexpected dtype {dtype}'
+        match dtype[0]:
+            case 'f':
+                match dtype[1:]:
+                    case '32':
+                        np_dtype = np.float32
+                    case '64':
+                        np_dtype = np.float64
+            case 'i':
+                match dtype[1:]:
+                    case '32':
+                        np_dtype = np.int32
+                    case '64':
+                        np_dtype = np.int64
+        np_shape = list(map(int, np_shape))
+        # if len(np_shape) > 0:
+        #     inputs.append((np.random.rand(*np_shape) * 100).astype(np_dtype))
+        # else:
+        #     inputs.append(np.array(np.random.rand() * 100, dtype=np_dtype))
+        inputs.append(np.zeros(np_shape, dtype=np_dtype))
+
+    return inputs

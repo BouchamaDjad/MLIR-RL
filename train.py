@@ -10,6 +10,7 @@ from rl_autoschedular.env import (
                                   
 from rl_autoschedular.model import HiearchyModel as Model
 import torch
+# import json
 from tqdm import tqdm
 from rl_autoschedular import config as cfg
 from utils.log import print_info
@@ -28,7 +29,7 @@ print_info('Finish imports')
 
 # Set environments
 if cfg.data_format == "json" and cfg.train_eval_split:
-    env,eval_env = train_eval_split(eval_size=0.2)
+    env,eval_env = train_eval_split(eval_size=cfg.train_eval_split)
 
 else:
     env = ParallelEnv(
@@ -40,7 +41,9 @@ else:
     eval_env = ParallelEnv(
         num_env=1,
         reset_repeat=1,
-        step_repeat=1
+        step_repeat=1,
+        # In case you will train on single-operations
+        # env_json_data = list(json.load(open("data/nn/eval_operations.json")).items()) if cfg.data_format == "json" else None
     )
 
 print_info('Env build ...')
@@ -61,10 +64,10 @@ optimizer = torch.optim.Adam(
 )
 
 # Set neptune logs if enabled
-neptune_logs = init_neptune(['hierchical', 'sparse_reward','all','no_bias','type_op','action history'] + cfg.tags) if cfg.logging else None
+neptune_logs = init_neptune(['type_op','action-history'] + cfg.tags) if cfg.logging else None
 
 # get run id 
-run_id = neptune_logs["sys/id"].fetch()
+run_id = neptune_logs["sys/id"].fetch() if cfg.logging else ""
 print_info(f"Run id: {run_id}")
 
 # Start training

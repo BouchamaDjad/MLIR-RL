@@ -1125,10 +1125,9 @@ def softmax(*args,dim=3):
     func.func private @softmax(%input: tensor<{SHAPE}>, %output: tensor<{SHAPE}>) -> tensor<{SHAPE}> attributes {{ "func.inline" = unit }} {{
     %zero = arith.constant 0.00000e+00 : f32
     // Allocate temporary tensors for max and sum computations\n"""
-    f"""%tmp_max = bufferization.alloc_tensor() : tensor<{Fill_SHAPE}>\n""" 
+    f"""%filled = bufferization.alloc_tensor() : tensor<{Fill_SHAPE}>\n""" 
     f"""
     // Inline compute_max functionality
-    %filled = linalg.fill ins(%zero : f32) outs(%tmp_max : tensor<{Fill_SHAPE}>) -> tensor<{Fill_SHAPE}>
     %max = linalg.reduce ins(%input: tensor<{SHAPE}>)
                             outs(%filled: tensor<{Fill_SHAPE}>) 
                             dimensions = [{dim - 1}]
@@ -1340,7 +1339,7 @@ def getShapes_Args(operation):
 
 
 LINALG_OPERATION_GENERATORS = {
-    # "add": add,
+    "add": add,
     # "add_nn": add_nn,
     # "sub": sub,
     # "max": max,
@@ -1361,10 +1360,10 @@ LINALG_OPERATION_GENERATORS = {
     # "conv_1d_ncw_fcw": conv_1d_ncw_fcw,
     # "conv_1d_nwc_wcf": conv_1d_nwc_wcf,
     # "conv_2d": conv_2d, # Integer use
-    # "conv_2d_nchw_fchw": conv_2d_nchw_fchw,
+    "conv_2d_nchw_fchw": conv_2d_nchw_fchw,
     # "conv_2d_ngchw_fgchw": conv_2d_ngchw_fgchw,
     # "conv_2d_nhwc_fhwc": conv_2d_nhwc_fhwc,
-    # "conv_2d_nhwc_hwcf": conv_2d_nhwc_hwcf,
+    "conv_2d_nhwc_hwcf": conv_2d_nhwc_hwcf,
     # "conv_3d": conv_3d, to skip
     # "conv_3d_ncdhw_fcdhw": conv_3d_ncdhw_fcdhw,
     # "depthwise_conv_1d_ncw_cw": depthwise_conv_1d_ncw_cw,
@@ -1376,22 +1375,22 @@ LINALG_OPERATION_GENERATORS = {
     # "depthwise_conv_3d_ncdhw_cdhw": depthwise_conv_3d_ncdhw_cdhw,
     # "depthwise_conv_3d_ndhwc_dhwc": depthwise_conv_3d_ndhwc_dhwc,
     # "depthwise_conv_3d_ndhwc_dhwcm": depthwise_conv_3d_ndhwc_dhwcm,
-    # "pooling_nchw_max": pooling_nchw_max,
-    # "pooling_nchw_sum": pooling_nchw_sum,
-    # "pooling_ncw_max": pooling_ncw_max,
-    # "pooling_ncw_sum": pooling_ncw_sum,
-    # "pooling_ndhwc_max": pooling_ndhwc_max,
-    # "pooling_ndhwc_min": pooling_ndhwc_min,
-    # "pooling_ndhwc_sum": pooling_ndhwc_sum,
-    # "pooling_nhwc_max": pooling_nhwc_max,
-    # "pooling_nhwc_min": pooling_nhwc_min,
-    # "pooling_nhwc_sum": pooling_nhwc_sum,
-    # "pooling_nwc_max": pooling_nwc_max,
-    # "pooling_nwc_sum": pooling_nwc_sum,
+    "pooling_nchw_max": pooling_nchw_max,
+    "pooling_nchw_sum": pooling_nchw_sum,
+    "pooling_ncw_max": pooling_ncw_max,
+    "pooling_ncw_sum": pooling_ncw_sum,
+    # "pooling_ndhwc_max": pooling_ndhwc_max,# They result in 276 GiB because of input allocation when execution with buinding
+    # "pooling_ndhwc_min": pooling_ndhwc_min,# They result in 276 GiB because of input allocation when execution with buinding
+    # "pooling_ndhwc_sum": pooling_ndhwc_sum,# They result in 276 GiB because of input allocation when execution with buinding
+    "pooling_nhwc_max": pooling_nhwc_max,
+    "pooling_nhwc_min": pooling_nhwc_min,
+    "pooling_nhwc_sum": pooling_nhwc_sum,
+    "pooling_nwc_max": pooling_nwc_max,
+    "pooling_nwc_sum": pooling_nwc_sum,
     "relu": relu,
     # "softmax_1d": lambda: softmax(dim=1),
-    # "softmax_2d": lambda *args: softmax(*args,dim=2),
+    "softmax_2d": lambda *args: softmax(*args,dim=2),
     # "softmax_3d": lambda *args: softmax(*args, dim=3),
     # "softmax_4d": lambda *args: softmax(*args, dim=4),
-    # "sigmoid": sigmoid
+    "sigmoid": sigmoid
 }

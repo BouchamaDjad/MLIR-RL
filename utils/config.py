@@ -114,7 +114,7 @@ class Config(metaclass=Singleton):
         assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
         assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
         assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
-        assert self.data_format != "json" or not self.use_bindings, "The specific case of using python bindings with JSON data format is not implemented yet."
+        # assert self.data_format != "json" or not self.use_bindings, "The specific case of using python bindings with JSON data format is not implemented yet."
         # Set loaded flag
         self.loaded = True
 

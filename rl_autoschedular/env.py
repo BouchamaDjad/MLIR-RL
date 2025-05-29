@@ -473,6 +473,7 @@ class Env:
             print_error(f'FAILED TRANSFORM: {transformation} {parameters} {state.transformation_history}')
             if transformation in ["vectorization", "fusion"]:
                 # This will create the file if it doesn't exist, or overwrite it if it does
+                # TODO IMPORTANT: bug could raise if bench_name is too big
                 with open(f'./errors_files/{bench_data.bench_name}_{state.operation_tag}.mlir', 'w') as f:
                     f.write(f"# Error in the transformation {transformation}, {parameters}, {state.transformation_history}\n")
                     f.write(state.transformed_code)
@@ -639,7 +640,7 @@ class Env:
                 next_state.exec_time = new_exec_time
 
             # if next_state.empty_schedule:
-            #     reward -= 0.2
+            #     reward -= 0.09 # maybe make it a config parameter ??
             #     print_alert("the model was penalized for an empty_schedule with -0.2")
 
         next_state.cummulative_reward += reward
@@ -659,7 +660,7 @@ class Env:
     def evaluate_step(self, transformed_code, next_state, transformation, parameters, reward=0):
         # Execute and evaluate the code
         if cfg.use_bindings:
-            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, next_state.bench_name)
+            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, timeout=150)
         else:
             new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=150)
         # Print infos and update reward

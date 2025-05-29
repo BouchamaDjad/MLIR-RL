@@ -1,27 +1,34 @@
 from dotenv import load_dotenv
-
-from utils.log import print_info
 load_dotenv(override=True)
 
 from rl_autoschedular.observation import (
-    __inline,
-    __lower_linalg_to_loops,
-    extract_function,
     extract_op_features_from_affine_code,
-    transform_wrapper,
-    get_ast,
-    get_raw_ast_info
+    inline,
+    main_wrapper
 )
-from rl_autoschedular.evaluation import evaluate_code_with_cmd_and_timeout
-from random import randint, choice, shuffle, random
+
+from rl_autoschedular.evaluation import evaluate_code_with_bindings_and_timeout
+
 from tqdm import tqdm
 import json
 import numpy as np
-import re
+
 import yaml
 from dataclasses import asdict
+import traceback
 import argparse
-from utils.generation import LINALG_OPERATION_GENERATORS,BATCH_SIZES,HEIGHTS,CHANNELS,KERNELS,DILATIONS,STRIDES,SIZES,randomSubGraph,softmax
+
+from data_utils.generation import (
+    # LINALG_OPERATION_GENERATORS,
+    BATCH_SIZES,
+    HEIGHTS,
+    CHANNELS,
+    KERNELS,
+    DILATIONS,
+    STRIDES,
+    SIZES,
+    randomSubGraph,
+)
 
 tmp_file = 'tmp/test_fill.mlir'
 
@@ -29,40 +36,6 @@ class ParserMock:
     def __init__(self,input_file,output_file):
         self.input_file = input_file
         self.output_file = output_file
-
-def fix(code: str) -> str:
-    # if "myFunction" not in code:
-    #     return code
-
-    # code = code.replace("func.func private @myFunction", "func.func @myFunction")
-    
-    # main,_ = extract_function(code, "main")
-    
-    # code = __inline(code, tmp_file_path)
-
-    _, (start, _) = extract_function(code, "main")
-
-    # "\n".join((code.splitlines()[:start] + main.splitlines()))
-
-    for line in code.splitlines():
-        if 'func.func @matmul' in line:
-            find = re.search(r"(tensor<\d+x[\d+x]*f32>)",line)
-            if find is not None:
-                shape = find.group(0)
-            break
-
-    code = '\n'.join(code.splitlines()[:start] + """func.func @main(){
-    %c1 = arith.constant 1: index
-    %c0 = arith.constant 0 : index
-    %n = arith.constant 2: index
-    scf.for %i = %c0 to %n step %c1 {
-    %outputmain = func.call @matmul() : () -> SHAPE
-    }
-    return
-}
-}""".replace('SHAPE',shape).splitlines())
-
-    return code
 
 
 if __name__ == '__main__':
@@ -73,9 +46,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # print_info(args.input_file,args.output_file)
+    print(args.input_file,args.output_file)
 
-    args = ParserMock(input_file="config/config.yaml",output_file="matmul_generic.json")
+    # args = ParserMock(input_file="config/config.yaml",output_file="t.json")
     
     with open(args.input_file, 'r') as file:
         config = yaml.safe_load(file)
@@ -94,10 +67,8 @@ if __name__ == '__main__':
     # }
 
     operations_config = {
-        "randomSubGraph": (randomSubGraph, 200)
+        "randomSubGraph": (randomSubGraph, 1000)
     }
-
-    # print( sum( amount for _, (_, amount) in operations_config.items() ) )
 
     all_operations = {}
 
@@ -107,9 +78,7 @@ if __name__ == '__main__':
         for i in tqdm(range(amount), desc=operation_name):
             
             exec_time = None  # Initialize execution time as None to enter the loop
-                
-            # Loop until a valid execution time is obtained
-            # while exec_time is None:
+            
             maps = None
             additional_function = None
             try:
@@ -123,45 +92,52 @@ if __name__ == '__main__':
                         maps = additional_tuple
                 else:
                     raw_operation = res
-                
-                # Get operation features
 
                 print(raw_operation)
                 
-                op_features = extract_op_features_from_affine_code(raw_operation,tmp_file,maps,additional_function)
+                # Get operation features
+                # op_features = extract_op_features_from_affine_code(raw_operation,tmp_file,maps,additional_function)
                 
-                loops_data = asdict(op_features)  # Convert the dataclass to a dictionary
-                loops_data.pop("raw_operation")  # Remove raw_operation
+                # loops_data = asdict(op_features)  # Convert the dataclass to a dictionary
+                # loops_data.pop("raw_operation")  # Remove raw_operation
                 
                 
-                transform_wrapped_operation = transform_wrapper(raw_operation, maps=maps, additional_function=additional_function)
-                transform_wrapped_operation = __inline(transform_wrapped_operation, tmp_file)
-                transform_wrapped_operation = fix(transform_wrapped_operation)
+                transform_wrapped_operation = main_wrapper(raw_operation, maps=maps, additional_function=additional_function)
+                transform_wrapped_operation = inline(transform_wrapped_operation, tmp_file)
 
                 # Evaluate the execution time of the transformed operation with a timeout of 300 seconds
-                exec_time, assertion = evaluate_code_with_cmd_and_timeout(transform_wrapped_operation, tmp_file, 300)
+                exec_time, assertion = evaluate_code_with_bindings_and_timeout(transform_wrapped_operation, 300)
 
-                # If the execution time is valid and below a certain threshold, calculate a more stable median execution time
-                if assertion and exec_time < 1000000:
-                    exec_time = np.median([exec_time] + [evaluate_code_with_cmd_and_timeout(transform_wrapped_operation, tmp_file,300)[0] for _ in range(2)])
+                # If the execution time is valid, calculate a more stable median execution time
+                if assertion and exec_time is not None:
+                    exec_time = np.median([exec_time] + [evaluate_code_with_bindings_and_timeout(transform_wrapped_operation, 300)[0] for _ in range(2)])
             
             except Exception as e:
-                print(f"\033[91;1mError occurred while generating operation: {e}\033[0m")   
+                print(f"\033[91;1mError occurred while generating operation: {e}\033[0m") 
+                traceback.print_exc()
                 continue
             
             # If a valid execution time was obtained, store the operation details
             if exec_time:
-                # print("write in progress")
                 
-                all_operations[f"{raw_operation}"] = {
+                all_operations[f"bench_{i}"] = {
                     "operation": raw_operation,  # The raw operation
                     "transform_wrapped_operation": transform_wrapped_operation,  # The transformed wrapped operation
-                    "loops_data": loops_data,  # Data related to the loops in the operation
+                    # "loops_data": loops_data,  # Data related to the loops in the operation
                     "execution_time": exec_time,  # The median execution time
                 }
             else:
                 continue  # If no valid execution time, skip to the next iteration
         
-        # Write all the collected operation data to the output file in JSON format
+    
+    # Remove duplicates from all_operations based on 'transform_wrapped_operation' value
+    unique_operations = {}
+    unique_transforms_wrapped = set()
+    
+    for key, value in all_operations.items():
+        if value["transform_wrapped_operation"] not in unique_transforms_wrapped:
+            unique_transforms_wrapped.add(value["transform_wrapped_operation"])
+            unique_operations[key] = value
+
     with open(args.output_file, 'w') as file:
-        json.dump(all_operations, file)
+        json.dump(unique_operations, file)

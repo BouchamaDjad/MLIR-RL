@@ -1,6 +1,6 @@
 import os
 import re
-from sys import stderr
+import traceback
 import numpy as np
 from mlir.ir import Context, Module
 from mlir.execution_engine import ExecutionEngine, ctypes
@@ -21,7 +21,7 @@ def evaluate_code_with_bindings(code: str) -> tuple[Optional[int], bool]:
         code (str): The MLIR code to run.
 
     Returns:
-        Optional[float]: the execution time in seconds.
+        Optional[float]: the execution time in nanoseconds (depends on what is returned by the code).
         bool: the assertion result.
     """
     pass_pipeline = """builtin.module(
@@ -58,6 +58,8 @@ def evaluate_code_with_bindings(code: str) -> tuple[Optional[int], bool]:
         cse
     )"""
 
+    os.environ["OMP_NUM_THREADS"] = str(cfg.openmp_num_threads)
+
     with Context():
         module = Module.parse(code)
         pm = PassManager.parse(pass_pipeline)
@@ -80,10 +82,13 @@ def evaluate_code_with_bindings(code: str) -> tuple[Optional[int], bool]:
     args.append(delta_arg)
 
     try:
-        [execution_engine.invoke("main", *args) for _ in range(2)]
+        [execution_engine.invoke("main", *args) for _ in range(1)]
     except Exception as e:
-        print(f"{e.with_traceback()}",file=stderr)
+        traceback.print_exc()    
         return None, False
+
+    if delta_arg[0] is None:
+        print("",end="")
 
     return delta_arg[0], True
 
@@ -96,11 +101,15 @@ def evaluate_code_with_bindings_wrapper(code: str, exec_times, assertions):
         exec_times (list): A list to store the execution times.
         assertions (list): A list to store the assertion results
     """
-    exec_time, assertion = evaluate_code_with_bindings(code)
+    try:
+        exec_time, assertion = evaluate_code_with_bindings(code)
+    except:
+        traceback.print_exc()        
+
     exec_times.append(exec_time)
     assertions.append(assertion)
 
-def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float]) -> tuple[Optional[int], Union[Exception, bool]]:
+def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float]) -> tuple[Optional[int], bool]:
     """Evaluates the given MLIR code using Python bindings with a timeout.
 
     Args:
@@ -109,7 +118,7 @@ def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float])
         timeout (Optional[float]): The timeout in seconds.
 
     Returns:
-        Optional[float]: the execution time in seconds.
+        Optional[float]: the execution time in nanoseconds.
         bool: the assertion result.
     """
     manager = multiprocessing.Manager()
@@ -127,6 +136,9 @@ def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float])
         return None, False
     else:
         # The function completed within the timeout
+        if not (exec_times and assertions):
+            print("", end="")
+        
         return exec_times[0] if exec_times else 0, assertions[0] if assertions else False
 
 # ================================== Evaluation Functions (MLIR CPU Runner) ==================================
@@ -145,7 +157,7 @@ def evaluate_code_with_cmd(code: str, tmp_file_path: str):
     command_1 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt  -loop-invariant-code-motion -canonicalize -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize='bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map' -convert-vector-to-scf -convert-linalg-to-loops -buffer-deallocation-pipeline -scf-forall-to-parallel -convert-scf-to-openmp -expand-strided-metadata -finalize-memref-to-llvm -convert-scf-to-cf -lower-affine -convert-arith-to-llvm -convert-openmp-to-llvm -convert-vector-to-llvm -convert-cf-to-llvm -convert-func-to-llvm -convert-math-to-llvm -finalize-memref-to-llvm -reconcile-unrealized-casts -canonicalize -cse"
     command_2 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-cpu-runner -e main -entry-point-result=void -shared-libs={os.getenv('LLVM_BUILD_PATH')}/lib/libmlir_runner_utils.so,{os.getenv('LLVM_BUILD_PATH')}/lib/libmlir_c_runner_utils.so,{os.getenv('LLVM_BUILD_PATH')}/lib/libomp.so"
 
-    os.environ["OMP_NUM_THREADS"] = "8"
+    os.environ["OMP_NUM_THREADS"] = str(cfg.openmp_num_threads)
 
     with open(tmp_file_path, "w") as file:
         file.write(code)
@@ -170,7 +182,7 @@ def evaluate_transform_with_cmd(code: str, tmp_file_path: str):
     command_1 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt  -loop-invariant-code-motion -canonicalize -eliminate-empty-tensors -empty-tensor-to-alloc-tensor -one-shot-bufferize='bufferize-function-boundaries function-boundary-type-conversion=identity-layout-map' -convert-vector-to-scf -convert-linalg-to-loops"
     # command_2 = f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-cpu-runner -e main -entry-point-result=void -shared-libs={os.getenv('LLVM_BUILD_PATH')}/lib/libmlir_runner_utils.so,{os.getenv('LLVM_BUILD_PATH')}/lib/libmlir_c_runner_utils.so,{os.getenv('LLVM_BUILD_PATH')}/lib/libomp.so"
 
-    os.environ["OMP_NUM_THREADS"] = "8"
+    os.environ["OMP_NUM_THREADS"] = str(cfg.openmp_num_threads)
 
     with open(tmp_file_path, "w") as file:
         file.write(code)

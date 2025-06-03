@@ -3,7 +3,7 @@ load_dotenv(override=True)
 
 from rl_autoschedular.observation import (
     extract_op_features_from_affine_code,
-    inline,
+    __inline,
     main_wrapper
 )
 
@@ -17,9 +17,10 @@ import yaml
 from dataclasses import asdict
 import traceback
 import argparse
+import random
 
 from data_utils.generation import (
-    # LINALG_OPERATION_GENERATORS,
+    LINALG_OPERATION_GENERATORS,
     BATCH_SIZES,
     HEIGHTS,
     CHANNELS,
@@ -28,9 +29,13 @@ from data_utils.generation import (
     STRIDES,
     SIZES,
     randomSubGraph,
+    randomblocks,
+    # ResNetBlock,
+    generate_resnet_block,
+    generate_residual_block_mlir
 )
 
-tmp_file = 'tmp/test_fill.mlir'
+tmp_file = 'tmp/tmp-3.mlir'
 
 class ParserMock:
     def __init__(self,input_file,output_file):
@@ -66,9 +71,40 @@ if __name__ == '__main__':
     #     operation_name: (LINALG_OPERATION_GENERATORS[operation_name], amount) for operation_name, amount in config['OPERATIONS'].items() if amount > 0
     # }
 
+    # print( sum( amount for _, (_, amount) in operations_config.items() ) )
+
     operations_config = {
-        "randomSubGraph": (randomSubGraph, 1000)
+        # "randomSubGraph": (randomSubGraph, 1400),
+
+        # "Linear block (sigmoid)": (
+        #     lambda :randomblocks(operations=[
+        #         "matmul",
+        #         "add",
+        #         "sigmoid"
+        #     ]),100
+        # ),
+
+        # "Linear block (relu)": (
+        #     lambda :randomblocks(operations=[
+        #         "matmul",
+        #         "add",
+        #         "relu"
+        #     ]),100
+        # ),
+
+        # "Conv2d block": (
+        #     lambda :randomblocks(operations=[
+        #         "conv_2d_nchw_fchw",
+        #         "relu"
+        #     ]),100
+        # ),
+
+        # "Resnet": (generate_resnet_block, 100),
+
+        # "Residual block": (generate_residual_block_mlir, 100)
+
     }
+
 
     all_operations = {}
 
@@ -102,8 +138,8 @@ if __name__ == '__main__':
                 # loops_data.pop("raw_operation")  # Remove raw_operation
                 
                 
-                transform_wrapped_operation = main_wrapper(raw_operation, maps=maps, additional_function=additional_function)
-                transform_wrapped_operation = inline(transform_wrapped_operation, tmp_file)
+                transform_wrapped_operation = main_wrapper(raw_operation, tmp_file ,maps=maps, additional_function=additional_function)
+                # transform_wrapped_operation = inline(transform_wrapped_operation, tmp_file)
 
                 # Evaluate the execution time of the transformed operation with a timeout of 300 seconds
                 exec_time, assertion = evaluate_code_with_bindings_and_timeout(transform_wrapped_operation, 300)
@@ -138,6 +174,8 @@ if __name__ == '__main__':
         if value["transform_wrapped_operation"] not in unique_transforms_wrapped:
             unique_transforms_wrapped.add(value["transform_wrapped_operation"])
             unique_operations[key] = value
+
+    del all_operations # To save memory
 
     with open(args.output_file, 'w') as file:
         json.dump(unique_operations, file)

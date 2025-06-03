@@ -4,9 +4,9 @@ import torchvision.models as models
 from torch_mlir.fx import export_and_import
 from torch_mlir.compiler_utils import lower_mlir_module, OutputType
 
-# model = models.resnet18(weights="DEFAULT").eval()
+model = models.resnet18(weights="DEFAULT").eval()
 # model = models.mobilenet_v2(weights='DEFAULT').eval()
-model = models.vgg.vgg11(weights="DEFAULT").eval()
+# model = models.vgg.vgg11(weights="DEFAULT").eval()
 
 model_name = model.__class__.__name__
 print(model_name)
@@ -17,6 +17,8 @@ module = export_and_import(
     output_type="linalg-on-tensors",
     func_name="forward"
 )
+
+
 
 print("------------------------ Loaded Resnet18 into Module ---------------------------------")
 

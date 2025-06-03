@@ -18,6 +18,8 @@ class Config(metaclass=Singleton):
     """The number of transformations"""
     vect_size_limit: int
     """Vectorization size limit to prevent large sizes vectorization"""
+    openmp_num_threads : int
+    """the number of threads given to openmp"""
     use_bindings: bool
     """Flag to enable using python bindings for execution, if False, the execution will be done using the command line. Default is False."""
     use_vectorizer: bool
@@ -62,6 +64,7 @@ class Config(metaclass=Singleton):
         self.num_tile_sizes = 7
         self.num_transformations = 5
         self.vect_size_limit = 512
+        self.openmp_num_threads = 8
         self.use_bindings = False
         self.use_vectorizer = False
         self.data_format = "json"
@@ -92,6 +95,7 @@ class Config(metaclass=Singleton):
         self.num_tile_sizes = config["num_tile_sizes"]
         self.num_transformations = config["num_transformations"]
         self.vect_size_limit = config["vect_size_limit"]
+        self.openmp_num_threads = config["openmp_num_threads"]
         self.use_bindings = config["use_bindings"]
         self.use_vectorizer = config["use_vectorizer"]
         self.data_format = config["data_format"]
@@ -114,6 +118,7 @@ class Config(metaclass=Singleton):
         assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
         assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
         assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
+        assert self.openmp_num_threads > 0, "Openmp threads number has to be strictly positive"
         # assert self.data_format != "json" or not self.use_bindings, "The specific case of using python bindings with JSON data format is not implemented yet."
         # Set loaded flag
         self.loaded = True
@@ -127,6 +132,7 @@ class Config(metaclass=Singleton):
             "num_tile_sizes": self.num_tile_sizes,
             "num_transformations": self.num_transformations,
             "vect_size_limit": self.vect_size_limit,
+            "openmp_num_threads": self.openmp_num_threads,
             "use_bindings": self.use_bindings,
             "use_vectorizer": self.use_vectorizer,
             "data_format": self.data_format,

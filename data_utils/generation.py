@@ -1,4 +1,6 @@
-from random import randint, choice, shuffle, random
+import traceback
+from random import randint, choice, shuffle, random, seed
+
 import re
 import string
 
@@ -25,8 +27,11 @@ DILATIONS = []
 STRIDES = []
 
 def add(*args):
+    if args:
+        SHAPE = "x".join(list(map(str,args[0])))
+    else:  
     # SHAPE = "x".join([str(choice(HEIGHTS)) for _ in range(randint(1, 3))])
-    SHAPE = "x".join([str(choice(HEIGHTS)) for _ in range(4)])
+        SHAPE = "x".join([str(choice(HEIGHTS)) for _ in range(4)])
     return f"linalg.add ins(%arg0, %arg1: tensor<{SHAPE}xf32>, tensor<{SHAPE}xf32>) outs(%arg2: tensor<{SHAPE}xf32>) -> tensor<{SHAPE}xf32>"
 
 
@@ -1004,20 +1009,38 @@ def pooling_nwc_sum(*args):
 
 
 def relu(*args):
-    
-    if random() < 0.25:
-        if args:
-            if len(args[0])==2:
-                N,S = tuple(args[0])
-            else:
+    if args:
+        if len(args[0]) not in [2,4]:
+            raise Exception("Skipped")
+
+        if len(args[0]) == 4:   
+            N,C,W,W_ = tuple(args[0])
+
+            if W != W_:
                 raise Exception("Skipped")
+
+        if len(args[0]) == 2:
+            N,S = tuple(args[0])
         else:
+            raise Exception("Skipped")
+
+    else: 
+        if random() < 0.25:
             N = choice(BATCH_SIZES)
             S = choice(CHANNELS)
-        
-        N = choice(BATCH_SIZES)
-        S = choice(SIZES)
-        SHAPE = f"{N}x{S}"
+            
+            SHAPE = f"{N}x{S}"
+            dim = 2
+
+        else:
+            N = choice(BATCH_SIZES)
+            C = choice(CHANNELS)
+            W = choice(HEIGHTS)
+            
+            SHAPE = f"{N}x{C}x{W}x{W}"
+            dim = 4
+
+    if dim == 2:
         
         relu_maps = """
         #map2 = affine_map<(d0, d1) -> (d0, d1)>
@@ -1034,23 +1057,6 @@ def relu(*args):
         """.strip().replace('SHAPE', SHAPE)
         
     else:
-
-        if args:
-            if len(args[0])!=3:
-                raise Exception("Skipped")
-            
-            N,C,W,W_ = tuple(args[0])
-
-            if W != W_:
-                raise Exception("Skipped")                
-
-        else:
-            N = choice(BATCH_SIZES)
-            C = choice(CHANNELS)
-            W = choice(HEIGHTS)
-    
-        
-        SHAPE = f"{N}x{C}x{W}x{W}"
     
         relu_maps = """
         #map = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
@@ -1156,6 +1162,38 @@ def softmax(*args,dim=3):
         ,(maps,additional_function)
     )
 
+def getShapes_Args(operation):
+    ins_outs_pattern = "(?:ins|outs)\s*\(([^())]+)\)"
+    fields = re.findall(ins_outs_pattern, operation)
+
+    if fields == []:
+	# # TODO: Add shape extraction so that allocation snippet could be replicated
+        fields = re.findall("(?:\(([^(]+)\))(?:\s*\->\s*([^(]+))", operation)[0]
+        
+        args,shapes = [],[]
+        for f in fields[0].split(", "):
+            shapes.append(f)
+        # shapes.append(fields[1])
+
+        args = re.findall("(?:@\w+\(([^)]+))",operation)[0].split(',')
+
+        args = [arg.strip() for arg in args]
+        shapes = [shape.strip() for shape in shapes]
+
+    else:
+        args, shapes = [], []
+        for field in fields:
+            args_field, shapes_field = field.split(':')
+            args   += args_field.split(',')
+            shapes += shapes_field.split(',')
+
+        args = [arg.strip() for arg in args]
+        shapes = [shape.strip() for shape in shapes]
+
+        args, shapes = __remove_duplicate_args(args, shapes)
+
+    return args,shapes
+
 # TODO: clean the code and refactor it
 def randomSubGraph(verbose=False):
     
@@ -1174,7 +1212,7 @@ def randomSubGraph(verbose=False):
     for _ in iterations:        
         
         operation_name = choice(list(LINALG_OPERATION_GENERATORS.keys())) # TODO: Restriction on operators
-        
+
         if verbose:
             print(f"\033[91m{operation_name=}\033[0m")
 
@@ -1305,37 +1343,408 @@ def randomSubGraph(verbose=False):
 
     return final_operation,(total_maps,total_additional_function)
 
-def getShapes_Args(operation):
-    ins_outs_pattern = "(?:ins|outs)\s*\(([^())]+)\)"
-    fields = re.findall(ins_outs_pattern, operation)
+def randomblocks(operations=[], verbose=False):
+    
+    params = []
+    shapes = []
+    return_vars = []
+    return_shapes = []
+    core = ""
 
-    if fields == []:
-	# # TODO: Add shape extraction so that allocation snippet could be replicated
-        fields = re.findall("(?:\(([^(]+)\))(?:\s*\->\s*([^(]+))", operation)[0]
+    total_maps = ""
+    total_additional_function = ""
+
+    for operation_name in operations:
         
-        args,shapes = [],[]
-        for f in fields[0].split(", "):
-            shapes.append(f)
-        # shapes.append(fields[1])
+        if verbose:
+            print(f"\033[91m{operation_name=}\033[0m")
 
-        args = re.findall("(?:@\w+\(([^)]+))",operation)[0].split(',')
+        if return_shapes and return_shapes[-1]:
+            shape = list(map(int,return_shapes[-1][len("tensor<"):-1].split('x')[:-1]))
+            
+            if verbose:
+                print(f'\033[33m{shape}\033[0m')
+            
+            try:
+                res = LINALG_OPERATION_GENERATORS[operation_name](shape)
+            except Exception as e:
+                traceback.print_exc()
+                if verbose:
+                    print(f"\033[33mskipped\033[0m")                
+                continue
+        else:
+            res = LINALG_OPERATION_GENERATORS[operation_name]()
+        
+        if verbose:
+            print(f"\033[92m{res}\033[0m")
 
-        args = [arg.strip() for arg in args]
-        shapes = [shape.strip() for shape in shapes]
+        maps = ""
+        additional_function = ""
 
-    else:
-        args, shapes = [], []
-        for field in fields:
-            args_field, shapes_field = field.split(':')
-            args   += args_field.split(',')
-            shapes += shapes_field.split(',')
+        if isinstance(res, tuple):
+            raw_operation, additional_tuple = res
+            if isinstance(additional_tuple, tuple):
+                maps, additional_function = additional_tuple
+                
+            else:
+                maps = additional_tuple
 
-        args = [arg.strip() for arg in args]
-        shapes = [shape.strip() for shape in shapes]
+        else:
+            raw_operation = res
 
-        args, shapes = __remove_duplicate_args(args, shapes)
+        # Handling maps with the same name from different generators
+        maps_identifiers = re.findall(r"#(\w+)[^\w]",maps)
+        for map_id in maps_identifiers:
+            new_map = f"map{''.join([choice(string.digits) for _ in range(5)])}"
+            
+            
+            maps = re.sub(rf'\b{map_id}\b', new_map, maps)
+            additional_function = re.sub(rf"\b{map_id}\b",new_map, additional_function)
+            raw_operation = re.sub(rf"\b{map_id}\b",new_map,raw_operation)
 
-    return args,shapes
+        # Handling additional functions with the same name (same generator called twice or user negligence)
+        functions_identifiers = re.findall(r"@(\w+)[^\w]", additional_function)
+        for func_id in functions_identifiers:
+            new_func = f"{func_id}{''.join([choice(string.digits) for _ in range(5)])}"
+            
+            additional_function = re.sub(rf"\b{func_id}\b",new_func, additional_function)
+            raw_operation = re.sub(rf"\b{func_id}\b",new_func,raw_operation)    
+
+
+        total_maps += "\n" + maps
+        total_additional_function += "\n" + additional_function
+
+        args,args_shape = getShapes_Args(raw_operation)
+
+        # change the input shape
+        if return_vars != []:
+            old_shape = args_shape[0]
+
+            # if any([x in raw_operation for x in ["matmul", "conv"]]):
+                # raw_operation = raw_operation.replace(old_shape, return_shapes[-1], 1)
+                # args_shape[0] = return_shapes[-1]
+
+            if all([x not in raw_operation for x in ["generic", "func.call"]]) and \
+                not any([x in raw_operation for x in ["matmul", "conv","pool"]]):
+                if verbose:
+                    print("\033[91m general shape change executed \033[0m")
+
+                raw_operation = raw_operation.replace(old_shape, return_shapes[-1])
+                args_shape = [return_shapes[-1] for _ in range(len(args_shape))]
+
+
+        # dealing with arguments with the same name from different generators
+        new_args = []
+        for i,arg in enumerate(args):
+            if i == 0 and return_vars != []:
+                new_arg = return_vars[-1]
+                args_shape.pop(0)
+
+            else:
+                new_arg = f"{arg}{''.join([choice(string.digits) for _ in range(5)])}"
+                new_args.append(new_arg)
+
+            raw_operation = raw_operation.replace(arg,new_arg)
+
+        
+        if params == []:
+            params.extend(new_args)
+            shapes.extend(args_shape)
+
+        else:
+            for arg,shape in zip(new_args,args_shape):
+                if "tensor" in shape:
+                    core += f"{arg} = bufferization.alloc_tensor() : {shape}\n"
+                else:
+                    core += f"{arg} = arith.constant 1.00000e+00 : f32\n"
+
+        return_var = f"%var{''.join([choice(string.digits) for _ in range(5)])}" # TODO: prod-cons links
+        return_vars.append(return_var)
+        
+        return_shape = args_shape[-1]
+        
+        if verbose:
+            print(f"\033[90m {return_shape=}\033[0m")
+        return_shapes.append(return_shape)
+
+        core += f"""{return_var} = {raw_operation} \n"""
+
+    core += f"""return {return_vars[-1]} : {return_shapes[-1]}\n"""
+
+    total_additional_function += f"""\nfunc.func private @myFunction({", ".join([f"{p}:{s}" for p,s in zip(params,shapes)])}) -> {return_shapes[-1]} {{        
+        {core}
+    }}"""
+
+    if verbose:
+        print(f'\033[94m{total_additional_function=}\033[0m')
+
+    final_operation = f"""func.call @myFunction({",".join(params)}) : ({",".join(shapes)}) -> {return_shapes[-1]}"""
+
+    return final_operation,(total_maps,total_additional_function)
+
+# TODO: refactor
+def generate_resnet_block(
+    input_tensor_name = "%arg60",
+    block_id=0,
+    bn_weight1_name="%arg0",
+    bn_bias1_name="%arg1", 
+    bn_mean1_name="%arg3",
+    bn_weight2_name="%arg4"
+):
+    """
+    Generate MLIR code for a parameterized ResNet block.
+    
+    Args:
+        input_tensor_name: Name of the input tensor variable
+        batch_size: Batch dimension
+        in_channels: Input channels
+        input_height: Input height
+        input_width: Input width
+        out_channels: Output channels (default 64)
+        block_id: Unique identifier for this block's variables
+        bn_weight1_name: First batch norm weight tensor name
+        bn_bias1_name: First batch norm bias tensor name
+        bn_mean1_name: First batch norm mean tensor name
+        bn_weight2_name: Second batch norm weight tensor name
+    
+    Returns:
+        str: MLIR code as f-string
+    """
+
+    batch_size = choice(BATCH_SIZES)
+    in_channels = choice(CHANNELS) 
+    input_height = choice(HEIGHTS)
+    input_width = choice(HEIGHTS)
+
+    out_channels = choice(CHANNELS)
+    out_channels = 64 if out_channels == in_channels else out_channels
+    # batch_size, in_channels, input_height, input_width = 256,256,150,56
+    
+    # Calculate output dimensions
+    conv1_height = input_height // 2  # stride=2 in first conv
+    conv1_width = input_width // 2
+    pool_height = conv1_height // 2   # stride=2 in max pool
+    pool_width = conv1_width // 2
+    padded_height = input_height + 6  # padding=3 on each side
+    padded_width = input_width + 6
+    
+    return (f"""func.call @Resnet({input_tensor_name}) : (tensor<{batch_size}x{in_channels}x{input_height}x{input_width}xf32>) -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>""", ('',f""" func.func private @Resnet({input_tensor_name} : tensor<{batch_size}x{in_channels}x{input_height}x{input_width}xf32>) -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32> {{
+  
+  // ResNet Block {block_id} - Input: {batch_size}x{in_channels}x{input_height}x{input_width}
+  // Constants
+  %cst_0_{block_id} = arith.constant 0.000000e+00 : f32
+  %cst_1_{block_id} = arith.constant 1.000000e+00 : f32
+  %cst_2_{block_id} = arith.constant 0xFF800000 : f32
+  %cst_3_{block_id} = arith.constant 1.000000e-05 : f64
+
+  // Tensor allocations for block {block_id}
+  %conv1_tensor_{block_id} = bufferization.alloc_tensor() : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>
+  %pool_tensor_{block_id} = bufferization.alloc_tensor() : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+  %bn_temp_{block_id} = bufferization.alloc_tensor() : tensor<{out_channels}xf32>
+  
+  // Create and initialize kernels
+  %kernel1_{block_id}_tmp = bufferization.alloc_tensor() : tensor<{out_channels}x{in_channels}x7x7xf32>
+  %kernel1_{block_id} = linalg.fill ins(%cst_0_{block_id} : f32) outs(%kernel1_{block_id}_tmp : tensor<{out_channels}x{in_channels}x7x7xf32>) -> tensor<{out_channels}x{in_channels}x7x7xf32>
+  
+  %kernel2_{block_id}_tmp = bufferization.alloc_tensor() : tensor<{out_channels}x{out_channels}x3x3xf32>
+  %kernel2_{block_id} = linalg.fill ins(%cst_0_{block_id} : f32) outs(%kernel2_{block_id}_tmp : tensor<{out_channels}x{out_channels}x3x3xf32>) -> tensor<{out_channels}x{out_channels}x3x3xf32>
+
+  // Pad input tensor (3 pixels on each side)
+  %padded_{block_id} = tensor.pad {input_tensor_name} low[0, 0, 3, 3] high[0, 0, 3, 3] {{
+  ^bb0(%arg61: index, %arg62: index, %arg63: index, %arg64: index):
+    tensor.yield %cst_0_{block_id} : f32
+  }} : tensor<{batch_size}x{in_channels}x{input_height}x{input_width}xf32> to tensor<{batch_size}x{in_channels}x{padded_height}x{padded_width}xf32>
+
+  
+  %arg0_tmp = bufferization.alloc_tensor() : tensor<{out_channels}xf32>
+  %arg0 = linalg.fill ins(%cst_0_{block_id} : f32) outs(%arg0_tmp : tensor<{out_channels}xf32>) -> tensor<{out_channels }xf32>
+
+  %arg1_tmp = bufferization.alloc_tensor() : tensor<{out_channels}xf32>
+  %arg1 = linalg.fill ins(%cst_0_{block_id} : f32) outs(%arg1_tmp : tensor<{out_channels}xf32>) -> tensor<{out_channels }xf32>
+
+  %arg3_tmp = bufferization.alloc_tensor() : tensor<{out_channels}xf32>
+  %arg3 = linalg.fill ins(%cst_0_{block_id} : f32) outs(%arg3_tmp : tensor<{out_channels}xf32>) -> tensor<{out_channels }xf32>
+
+  %arg4_tmp = bufferization.alloc_tensor() : tensor<{out_channels}xf32>
+  %arg4 = linalg.fill ins(%cst_0_{block_id} : f32) outs(%arg4_tmp : tensor<{out_channels}xf32>) -> tensor<{out_channels }xf32>
+  
+  // Expand batch norm parameters
+  %expanded_{block_id} = tensor.expand_shape {bn_weight1_name} [[0, 1, 2]] output_shape [{out_channels}, 1, 1] : tensor<{out_channels}xf32> into tensor<{out_channels}x1x1xf32>
+  %expanded_mean_{block_id} = tensor.expand_shape {bn_mean1_name} [[0, 1, 2]] output_shape [{out_channels}, 1, 1] : tensor<{out_channels}xf32> into tensor<{out_channels}x1x1xf32>
+
+  // Initialize output tensor
+  %conv1_init_{block_id} = linalg.fill ins(%cst_0_{block_id} : f32) outs(%conv1_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>) -> tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>
+
+  // First convolution (7x7, stride=2)
+  %conv1_{block_id} = linalg.conv_2d_nchw_fchw {{dilations = dense<1> : vector<2xi64>, strides = dense<2> : vector<2xi64>}} ins(%padded_{block_id}, %kernel1_{block_id} : tensor<{batch_size}x{in_channels}x{padded_height}x{padded_width}xf32>, tensor<{out_channels}x{in_channels}x7x7xf32>) outs(%conv1_init_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>) -> tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>
+
+  // First batch normalization
+  %bn1_1_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]}} ins({bn_bias1_name} : tensor<{out_channels}xf32>) outs(%bn_temp_{block_id} : tensor<{out_channels}xf32>)  {{
+  ^bb0(%in: f32, %out: f32):
+    %eps = arith.truncf %cst_3_{block_id} : f64 to f32
+    %result = arith.addf %in, %eps : f32
+    linalg.yield %result : f32
+  }} -> tensor<{out_channels}xf32>
+
+  %bn1_2_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]}} ins(%bn1_1_{block_id} : tensor<{out_channels}xf32>) outs(%bn_temp_{block_id} : tensor<{out_channels}xf32>)  {{
+  ^bb0(%in: f32, %out: f32):
+    %result = math.sqrt %in : f32
+    linalg.yield %result : f32
+  }} -> tensor<{out_channels}xf32>
+
+  %bn1_3_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]}} ins(%bn1_2_{block_id} : tensor<{out_channels}xf32>) outs(%bn_temp_{block_id} : tensor<{out_channels}xf32>)  {{
+  ^bb0(%in: f32, %out: f32):
+    %check = arith.cmpf one, %in, %cst_0_{block_id} : f32
+    cf.assert %check, "unimplemented: tensor with zero element"
+    %result = arith.divf %cst_1_{block_id}, %in : f32
+    linalg.yield %result : f32
+  }} -> tensor<{out_channels}xf32>
+
+  %expanded_scale_{block_id} = tensor.expand_shape %bn1_3_{block_id} [[0, 1, 2]] output_shape [{out_channels}, 1, 1] : tensor<{out_channels}xf32> into tensor<{out_channels}x1x1xf32>
+
+  // Apply batch normalization to conv output
+  %bn_applied1_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d1, 0, 0)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>], iterator_types = ["parallel", "parallel", "parallel", "parallel"]}} ins(%conv1_{block_id}, %expanded_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>, tensor<{out_channels}x1x1xf32>) outs(%conv1_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>)  {{
+  ^bb0(%in: f32, %in_161: f32, %out: f32):
+    %result = arith.subf %in, %in_161 : f32
+    linalg.yield %result : f32
+  }} -> tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>
+
+  %bn_applied2_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d1, 0, 0)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>], iterator_types = ["parallel", "parallel", "parallel", "parallel"]}} ins(%bn_applied1_{block_id}, %expanded_scale_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>, tensor<{out_channels}x1x1xf32>) outs(%conv1_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>)  {{
+  ^bb0(%in: f32, %in_161: f32, %out: f32):
+    %result = arith.mulf %in, %in_161 : f32
+    linalg.yield %result : f32
+  }} -> tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>
+
+  // ReLU activation
+  %relu1_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>], iterator_types = ["parallel", "parallel", "parallel", "parallel"]}} ins(%bn_applied2_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>) outs(%conv1_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>)  {{
+  ^bb0(%in: f32, %out: f32):
+    %is_positive = arith.cmpf ugt, %in, %cst_0_{block_id} : f32
+    %result = arith.select %is_positive, %in, %cst_0_{block_id} : f32
+    linalg.yield %result : f32
+  }} -> tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32>
+
+  // Pad for max pooling
+  %padded_pool_{block_id} = tensor.pad %relu1_{block_id} low[0, 0, 1, 1] high[0, 0, 1, 1] {{
+  ^bb0(%arg61: index, %arg62: index, %arg63: index, %arg64: index):
+    tensor.yield %cst_2_{block_id} : f32
+  }} : tensor<{batch_size}x{out_channels}x{conv1_height}x{conv1_width}xf32> to tensor<{batch_size}x{out_channels}x{conv1_height + 2}x{conv1_width + 2}xf32>
+
+  // Max pooling
+  %pool_init_{block_id} = linalg.fill ins(%cst_2_{block_id} : f32) outs(%pool_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>) -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+  %pool_kernel_{block_id} = bufferization.alloc_tensor() : tensor<3x3xf32>
+  
+  %maxpool_{block_id} = linalg.pooling_nchw_max {{dilations = dense<1> : vector<2xi64>, strides = dense<2> : vector<2xi64>}} ins(%padded_pool_{block_id}, %pool_kernel_{block_id} : tensor<{batch_size}x{out_channels}x{conv1_height + 2}x{conv1_width + 2}xf32>, tensor<3x3xf32>) outs(%pool_init_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>) -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+
+  // Pad for second conv
+  %padded_conv2_{block_id} = tensor.pad %maxpool_{block_id} low[0, 0, 1, 1] high[0, 0, 1, 1] {{
+  ^bb0(%arg61: index, %arg62: index, %arg63: index, %arg64: index):
+    tensor.yield %cst_0_{block_id} : f32
+  }} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32> to tensor<{batch_size}x{out_channels}x{pool_height + 2}x{pool_width + 2}xf32>
+
+  %conv2_init_{block_id} = linalg.fill ins(%cst_0_{block_id} : f32) outs(%pool_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>) -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+
+  %conv2_{block_id} = linalg.conv_2d_nchw_fchw {{dilations = dense<1> : vector<2xi64>, strides = dense<1> : vector<2xi64>}} ins(%padded_conv2_{block_id}, %kernel2_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height + 2}x{pool_width + 2}xf32>, tensor<{out_channels}x{out_channels}x3x3xf32>) outs(%conv2_init_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>) -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+
+  // Second batch normalization
+  %bn2_1_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]}} ins({bn_weight2_name} : tensor<{out_channels}xf32>) outs(%bn_temp_{block_id} : tensor<{out_channels}xf32>)  {{
+  ^bb0(%in: f32, %out: f32):
+    %eps = arith.truncf %cst_3_{block_id} : f64 to f32
+    %result = arith.addf %in, %eps : f32
+    linalg.yield %result : f32
+  }} -> tensor<{out_channels}xf32>
+
+  %bn2_2_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]}} ins(%bn2_1_{block_id} : tensor<{out_channels}xf32>) outs(%bn_temp_{block_id} : tensor<{out_channels}xf32>)  {{
+  ^bb0(%in: f32, %out: f32):
+    %result = math.sqrt %in : f32
+    linalg.yield %result : f32
+  }} -> tensor<{out_channels}xf32>
+
+  %bn2_3_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0) -> (d0)>, affine_map<(d0) -> (d0)>], iterator_types = ["parallel"]}} ins(%bn2_2_{block_id} : tensor<{out_channels}xf32>) outs(%bn_temp_{block_id} : tensor<{out_channels}xf32>)  {{
+  ^bb0(%in: f32, %out: f32):
+    %check = arith.cmpf one, %in, %cst_0_{block_id} : f32
+    cf.assert %check, "unimplemented: tensor with zero element"
+    %result = arith.divf %cst_1_{block_id}, %in : f32
+    linalg.yield %result : f32
+  }} -> tensor<{out_channels}xf32>
+
+  %expanded_scale2_{block_id} = tensor.expand_shape %bn2_3_{block_id} [[0, 1, 2]] output_shape [{out_channels}, 1, 1] : tensor<{out_channels}xf32> into tensor<{out_channels}x1x1xf32>
+
+  // Apply second batch normalization
+  %final_bn1_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d1, 0, 0)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>], iterator_types = ["parallel", "parallel", "parallel", "parallel"]}} ins(%conv2_{block_id}, %expanded_mean_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>, tensor<{out_channels}x1x1xf32>) outs(%pool_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>)  {{
+  ^bb0(%in: f32, %in_161: f32, %out: f32):
+    %result = arith.subf %in, %in_161 : f32
+    linalg.yield %result : f32
+  }} -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+
+  %final_bn2_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d1, 0, 0)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>], iterator_types = ["parallel", "parallel", "parallel", "parallel"]}} ins(%final_bn1_{block_id}, %expanded_scale2_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>, tensor<{out_channels}x1x1xf32>) outs(%pool_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>)  {{
+  ^bb0(%in: f32, %in_161: f32, %out: f32):
+    %result = arith.mulf %in, %in_161 : f32
+    linalg.yield %result : f32
+  }} -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+
+  // Final ReLU - Output tensor: %final_relu_{block_id}
+  %final_relu_{block_id} = linalg.generic {{indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>, affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>], iterator_types = ["parallel", "parallel", "parallel", "parallel"]}} ins(%final_bn2_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>) outs(%pool_tensor_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>)  {{
+  ^bb0(%in: f32, %out: f32):
+    %is_positive = arith.cmpf ugt, %in, %cst_0_{block_id} : f32
+    %result = arith.select %is_positive, %in, %cst_0_{block_id} : f32
+    linalg.yield %result : f32
+  }} -> tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+
+  return %final_relu_{block_id} : tensor<{batch_size}x{out_channels}x{pool_height}x{pool_width}xf32>
+
+  // End of ResNet Block {block_id} - Output: {batch_size}x{out_channels}x{pool_height}x{pool_width}
+}}"""))
+
+def generate_residual_block_mlir(block_name="residual_block"):
+    """
+    Generate MLIR code for a residual block that takes input of shape tensor<{N}x{K}xf32>
+    
+    Args:
+        N (int): First dimension size
+        K (int): Second dimension size  
+        block_name (str): Name of the function block
+    
+    Returns:
+        str: MLIR code for the residual block where F(input) = ReLU(input @ W)
+    """
+
+    N,K = choice(SIZES),choice(SIZES)
+
+    
+    mlir_code = f'''func.func private @{block_name}(%input: tensor<{N}x{K}xf32>) -> tensor<{N}x{K}xf32> {{
+  // F(input) = ReLU(input @ W)
+  %weights = arith.constant dense<1.0> : tensor<{K}x{K}xf32>
+  %zero_tensor = arith.constant dense<0.0> : tensor<{N}x{K}xf32>
+  
+  // Linear transformation: input @ weights
+  %matmul = linalg.matmul ins(%input, %weights : tensor<{N}x{K}xf32>, tensor<{K}x{K}xf32>) 
+                          outs(%zero_tensor : tensor<{N}x{K}xf32>) -> tensor<{N}x{K}xf32>
+  
+  // ReLU activation on the matmul result
+  %zero = arith.constant 0.0 : f32
+  %relu = linalg.generic {{
+    indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0, d1)>],
+    iterator_types = ["parallel", "parallel"]
+  }} ins(%matmul : tensor<{N}x{K}xf32>) outs(%zero_tensor : tensor<{N}x{K}xf32>) {{
+  ^bb0(%in: f32, %out: f32):
+    %90 = arith.cmpf ugt, %in, %zero: f32
+    %max = arith.select %90, %in, %zero : f32
+    linalg.yield %max : f32
+  }} -> tensor<{N}x{K}xf32>
+  
+  // Residual connection: output = input + F(input) = input + ReLU(input @ W)
+  %residual_output = linalg.generic {{
+    indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0, d1)>],
+    iterator_types = ["parallel", "parallel"]
+  }} ins(%input, %relu : tensor<{N}x{K}xf32>, tensor<{N}x{K}xf32>) outs(%zero_tensor : tensor<{N}x{K}xf32>) {{
+  ^bb0(%in1: f32, %in2: f32, %out: f32):
+    %sum = arith.addf %in1, %in2 : f32
+    linalg.yield %sum : f32
+  }} -> tensor<{N}x{K}xf32>
+  
+  return %residual_output : tensor<{N}x{K}xf32>}}'''
+
+    return (f"func.call @{block_name}(%input) : (tensor<{N}x{K}xf32>) -> tensor<{N}x{K}xf32>",('',mlir_code))
 
 
 LINALG_OPERATION_GENERATORS = {

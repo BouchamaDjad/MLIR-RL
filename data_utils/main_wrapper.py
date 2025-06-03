@@ -1,5 +1,26 @@
 import re
-from rl_autoschedular.observation import __remove_duplicate_args
+
+def __remove_duplicate_args(args: list[str], shapes: list[str]):
+    """Removes duplicate pairs from the list of paired arguments with shapes
+    Args:
+        args (list[str]): list of arguments
+        shapes (list[str]): list of shapes
+
+    Returns:
+        list[str]: list of arguments without duplicates
+        list[str]: list of shapes without duplicates
+    """
+    args_shapes = list(zip(args, shapes))
+    seen = set()
+    result = []
+    for item in args_shapes:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+
+    args = [x for (x, _) in result]
+    shapes = [x for (_, x) in result]
+    return args, shapes
 
 def read_file_stream(filename: str):
     """used for huge files"""
@@ -140,15 +161,16 @@ def main_wrapper(filename,model_name, out):
 
 if __name__ == "__main__":
     # filename = "../benchmarks/MobileNetV2_linalg_asm.mlir" 
-    filename = "../benchmarks/resnet18_linalg_asm.mlir"
+    filename = "../benchmarks/ResNet_linalg.mlir"
     # filename = "../benchmarks/VGG_linalg_asm.mlir"
 
     out = "../benchmarks/test.mlir"
 
-    # model_name = "ResNet"
+    model_name = "ResNet"
     # model_name = "MobileNetV2"
-    # model_name = "VGG"
+    # model_name = "VGG" 
+    # model_name = "forward"
 
-    main_wrapper(filename, "forward", out)
+    main_wrapper(filename, model_name, out)
 
     

@@ -292,7 +292,6 @@ class Env:
             Optional[OperationState]: The final state of the environment if the episode is done.
         """
         if state.step_count == 0:
-            print('-' * 30)
             print(f"Operation: {state.bench_name} - {state.operation_tag}")
             print(f"Operation type: {state.operation_type}")
 
@@ -528,8 +527,8 @@ class Env:
                 reward, new_exec_time, execution_error = self.evaluate_step(transformed_code, state, transformation, parameters, reward)              
                 evaluated_step = True
                 # TODO: see if this could be usefull
-                # if execution_error:
-                #     trans_failed = True
+                if execution_error:
+                    trans_failed = True
 
                 speedup_metric = state.exec_time / new_exec_time
                 print("\n")
@@ -543,7 +542,7 @@ class Env:
                 print('New Exec time:', new_exec_time * 10**-9, 's')
                 print(f"reward: {reward}")
                 print(f"cummulative reward: {state.cummulative_reward + reward}")
-                print('-' * 30)
+                print("\n")
 
                 # TODO: Check what is happening here
                 # Re-extract operations data from the new code
@@ -660,9 +659,9 @@ class Env:
     def evaluate_step(self, transformed_code, next_state, transformation, parameters, reward=0):
         # Execute and evaluate the code
         if cfg.use_bindings:
-            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, timeout=150)
+            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, timeout=200)
         else:
-            new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=150)
+            new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=200)
         # Print infos and update reward
         if new_exec_time is None:
             reward -= 20

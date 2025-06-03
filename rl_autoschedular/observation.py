@@ -7,6 +7,7 @@ from copy import copy
 import subprocess
 from rl_autoschedular import config as cfg
 from rl_autoschedular.state import OperationFeatures, NestedLoopFeatures, BenchmarkFeatures, LoopFeatures, LoopNode
+import fcntl
 
 
 # ================================================ Public functions ================================================
@@ -992,7 +993,7 @@ def transform_wrapper(operation, maps: Optional[str]=None, additional_function: 
 
     return code
 
-def main_wrapper(operation, maps: Optional[str]=None, additional_function: Optional[str] = None):
+def main_wrapper(operation, tmp_file, maps: Optional[str]=None, additional_function: Optional[str] = None):
     
     ins_outs_pattern = "(?:ins|outs)\s*\(([^())]+)\)"
     fields = re.findall(ins_outs_pattern, operation)
@@ -1039,7 +1040,7 @@ def main_wrapper(operation, maps: Optional[str]=None, additional_function: Optio
             dims.append( -1 )
 
     #############################################################
-    last_dim = list(map(str,dims[-1]))
+    # last_dim = list(map(str,dims[-1]))
 
     # All code:
     code = ""
@@ -1047,7 +1048,7 @@ def main_wrapper(operation, maps: Optional[str]=None, additional_function: Optio
         code += f"{maps}\n"
     
     code += 'module attributes {torch.debug_module_name = "Net"} {\n'
-    code += f'memref.global "private" constant @my_global_memref : memref<{"x".join(last_dim)}xf32>\n'
+    # code += f'memref.global "private" constant @my_global_memref : memref<{"x".join(last_dim)}xf32>\n'
     code += "func.func private @nanoTime() -> i64 attributes { llvm.emit_c_interface }\n"
     code += "func.func private @printI64(i64)\n"
     code += "func.func private @printF32(f32)\n"
@@ -1055,42 +1056,93 @@ def main_wrapper(operation, maps: Optional[str]=None, additional_function: Optio
     code += "\n"
     code += f"{additional_function}" if additional_function else ''
     code += "\n"
-    code += f"func.func @main({', '.join([f'{arg}: {shape}' for arg,shape in zip(args, shapes) ])}) -> i64 attributes {{ llvm.emit_c_interface }} {{\n"
-    
-    # code += "    %c1 = arith.constant 1: index\n"
-    # code += "    %c0 = arith.constant 0 : index\n"
-    # code += "    %n = arith.constant 2: index\n"
-    # code += "    %init_delta = arith.constant 0 : i64\n"
-    
-    code += " \n"
-    # code += "    %final_delta = scf.for %i = %c0 to %n step %c1 iter_args(%d = %init_delta) -> (i64) {\n"
-    code += "    %t0 = func.call @nanoTime() : () -> (i64)\n"
-    code += f"    %outputmain = {operation} \n"
-    code += "    %t = func.call @nanoTime() : () -> (i64)\n"
-    code += "    %delta = arith.subi %t, %t0 : i64\n"
-    code += "    //func.call @printI64(%delta) : (i64) -> ()\n"
-    code += f"    %memref = bufferization.to_memref %outputmain : memref<{'x'.join(last_dim)}xf32>\n"
-    code += f"    %global = memref.get_global @my_global_memref : memref<{'x'.join(last_dim)}xf32>\n"
-    code += f"    memref.copy %memref, %global : memref<{'x'.join(last_dim)}xf32> to memref<{'x'.join(last_dim)}xf32>\n"
-    code += "    func.call @printNewline() : () -> ()\n"
-    # code += "    scf.yield %delta : i64\n"
-    # code += "}\n"
-    code += "    return %delta : i64\n"
+    code += f"func.func @wrapper({', '.join([f'{arg}: {shape}' for arg,shape in zip(args, shapes) ])}) -> {shapes[-1]} {{\n"
+    code += f"    %return_arg = {operation}\n"
+    code += f"    return %return_arg : {shapes[-1]}\n"
     code += "}\n"
-    code += "}\n"
+
+    new_code = __inline(code + "}\n", tmp_file)
+
+    if new_code is None:
+        raise ValueError("Code couldn't be inlined")
+
+    # func_line = [line for line in new_code.splitlines() if "func.func @wrapper" in line][0]
+
+    # # Extract argument list and shapes from func_line
+
+    # # Find the argument list and return type
+    # args_part = func_line.split('(', 1)[1].rsplit(')', 1)[0]
+    # return_shape = func_line.split('->')[-1].split('{')[0].strip()
+
+    # # Split arguments and extract shapes
+    # args_list = []
+    # shapes_list = []
+    # for arg in args_part.split(','):
+    #     arg = arg.strip()
+    #     if not arg:
+    #         continue
+    #     if ':' in arg:
+    #         arg_name, arg_shape = arg.split(':', 1)
+    #         args_list.append(arg_name.strip())
+    #         shapes_list.append(arg_shape.strip())
+
+    # # Add the return shape
+    # shapes_list.append(return_shape)
+
+    # if len(args) != len(args_list) or shapes != shapes_list:
+    #     print("", end="")
+
+    code = new_code
+
+    code = code.strip()[:-1]
+    
+    return_shape = shapes[-1]
+    shapes = shapes if len(shapes) == len(args) else shapes[:-1]
+
+    main_code = f"func.func @main({', '.join([f'{arg}: {shape}' for arg,shape in zip(args, shapes) ])}) -> i64 attributes {{ llvm.emit_c_interface }} {{\n"
+    
+    main_code += "    %c1 = arith.constant 1: index\n"
+    main_code += "    %c0 = arith.constant 0 : index\n"
+    main_code += "    %n = arith.constant 2: index\n"
+    main_code += "    %init_delta = arith.constant 0 : i64\n"
+    
+    main_code += " \n"
+    main_code += "    %final_delta = scf.for %i = %c0 to %n step %c1 iter_args(%d = %init_delta) -> (i64) {\n"
+    main_code += "    %t0 = func.call @nanoTime() : () -> (i64)\n"
+    
+    main_code += f"    %outputmain =  func.call @wrapper({', '.join(args)}) : ({', '.join(shapes)}) -> ({return_shape})\n"
+    main_code += "    %t = func.call @nanoTime() : () -> (i64)\n"
+    main_code += "    %delta = arith.subi %t, %t0 : i64\n"
+    # main_code += "    //func.call @printI64(%delta) : (i64) -> ()\n"
+    # main_code += f"    %memref = bufferization.to_memref %outputmain : memref<{'x'.join(last_dim)}xf32>\n"
+    # main_code += f"    %global = memref.get_global @my_global_memref : memref<{'x'.join(last_dim)}xf32>\n"
+    # main_code += f"    memref.copy %memref, %global : memref<{'x'.join(last_dim)}xf32> to memref<{'x'.join(last_dim)}xf32>\n"
+    # main_code += "    func.call @printNewline() : () -> ()\n"
+    main_code += "    scf.yield %delta : i64\n"
+    main_code += "}\n"
+    main_code += "    return %final_delta : i64\n"
+    main_code += "}\n"
+    main_code += "}\n"
+
+    code = code + main_code
 
     return code
 
-def inline(code: str, tmp_file_path: str):
-    # Write the MLIR code to a temporary file
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
-
-    # Lower the Linalg dialect code to Affine dialect
-    out = os.popen(f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt --inline {tmp_file_path}").read()
-
-    # with open(f"{tmp_file_path}.out","r") as f:
-    #     out = f.read() 
+def __inline(code: str, tmp_file_path: str):
+    # Lock the file exclusively for writing and reading during the whole operation
+    out = ""
+    with open(tmp_file_path, "w+") as file:
+        fcntl.flock(file, fcntl.LOCK_EX)
+        try:
+            # file.seek(0)
+            # file.truncate()
+            file.write(code)
+            file.flush()
+            os.fsync(file.fileno())
+            # Now run mlir-opt while still holding the lock
+            out = os.popen(f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt --inline {tmp_file_path}").read()
+        finally:
+            fcntl.flock(file, fcntl.LOCK_UN)
 
     if out != '':
         return out

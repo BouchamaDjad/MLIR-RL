@@ -1,5 +1,10 @@
 import random
 import string
+from hashlib import sha256
+
+
+def stable_hash(s: str) -> str:
+    return sha256(s.encode('utf-8')).hexdigest()
 
 
 def generate_random_string():

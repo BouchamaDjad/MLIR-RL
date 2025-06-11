@@ -2,6 +2,8 @@ import os
 import re
 import traceback
 import numpy as np
+import json
+
 from mlir.ir import Context, Module
 from mlir.execution_engine import ExecutionEngine, ctypes
 from mlir.runtime import get_ranked_memref_descriptor
@@ -10,6 +12,33 @@ from typing import Union, Optional
 import multiprocessing
 from rl_autoschedular import config as cfg
 from utils.log import print_error
+
+def get_cached_execution_time(transformed_code: str) -> Optional[int]:
+    if not cfg.cache_file:
+        return None
+    
+    with open(cfg.cache_file,"r") as f:
+        exec_cache : dict[str,int] = json.load(f)
+    
+    key = str(hash(transformed_code)) # JSON only accepts strings as keys
+    
+    return exec_cache.get(key) # None if key is not set
+
+def set_cached_execution_time(transformed_code: str, execution_time: int):
+    if not cfg.cache_file:
+        return
+    
+    with open(cfg.cache_file,"r+") as f:
+        exec_cache: dict[str,int] = json.load(f)
+    
+        key = hash(transformed_code) # JSON automatically transforms keys to string type
+        exec_cache[key] = execution_time
+
+        f.seek(0)
+        f.truncate()
+
+        json.dump(exec_cache, f)
+
 
 # ================================== Evaluation Functions (Python Bindings) ==================================
 

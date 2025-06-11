@@ -28,6 +28,10 @@ class Config(metaclass=Singleton):
     """The format of the data, can be either "json" or "mlir". "json" mode reads json files containing benchmark features, "mlir" mode reads mlir code files directly and extract features from it using AST dumper. Default is "json"."""
     optimization_mode: Literal["last", "all"]
     """The optimization mode to use, "last" will optimize only the last operation, "all" will optimize all operations in the code. Default is "last"."""
+    dataset_length : int
+    """the number of instance that will be used in the training and evaluation set"""
+    cache_file: str
+    """The path to the cache file that will be used to store execution times (to optimize the run's runtime)"""
     benchmarks_folder_path: str
     """Path to the benchmarks folder. Can be empty if data format is set to "json"."""
     len_trajectory: int
@@ -69,6 +73,8 @@ class Config(metaclass=Singleton):
         self.use_vectorizer = False
         self.data_format = "json"
         self.optimization_mode = "last"
+        self.dataset_length = 0
+        self.cache_file = ""
         self.benchmarks_folder_path = ""
         self.len_trajectory = 64
         self.ppo_batch_size = 64
@@ -100,6 +106,8 @@ class Config(metaclass=Singleton):
         self.use_vectorizer = config["use_vectorizer"]
         self.data_format = config["data_format"]
         self.optimization_mode = config["optimization_mode"]
+        self.dataset_length = config['dataset_length']
+        self.cache_file = config["cache_file"]
         self.benchmarks_folder_path = config["benchmarks_folder_path"]
         self.len_trajectory = config["len_trajectory"]
         self.ppo_batch_size = config["ppo_batch_size"]
@@ -119,6 +127,18 @@ class Config(metaclass=Singleton):
         assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
         assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
         assert self.openmp_num_threads > 0, "Openmp threads number has to be strictly positive"
+        assert self.dataset_length >= 0, "the number of instances cannot be negative"
+
+        if self.cache_file:
+            if not os.path.exists(self.cache_file):
+                with open(self.cache_file, "w") as g:
+                    json.dump({}, g)
+            else:
+                with open(self.cache_file, "r+") as g:
+                    if g.read() == "":
+                        json.dump({}, g)
+
+        
         # assert self.data_format != "json" or not self.use_bindings, "The specific case of using python bindings with JSON data format is not implemented yet."
         # Set loaded flag
         self.loaded = True
@@ -137,6 +157,8 @@ class Config(metaclass=Singleton):
             "use_vectorizer": self.use_vectorizer,
             "data_format": self.data_format,
             "optimization_mode": self.optimization_mode,
+            "dataset_length":self.dataset_length,
+            "cache_file": self.cache_file,
             "benchmarks_folder_path": self.benchmarks_folder_path,
             "len_trajectory": self.len_trajectory,
             "ppo_batch_size": self.ppo_batch_size,

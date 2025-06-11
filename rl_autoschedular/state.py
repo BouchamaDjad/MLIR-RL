@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 import numpy as np
+from copy import deepcopy
 
 class LoopNode:
     def __init__(self, arg, upper,lower, parent,vector):
@@ -67,6 +68,17 @@ class BenchmarkFeatures:
     """Execution time of the benchmark in nanoseconds."""
     root_exec_time: int
     """Execution time of the benchmark in nanoseconds without any transformation."""
+
+    def copy(self):
+        """Create a deep copy of the BenchmarkFeatures instance."""
+        return BenchmarkFeatures(
+            bench_name=self.bench_name,
+            code=self.code,
+            operation_tags=deepcopy(self.operation_tags),
+            operations=deepcopy(self.operations),
+            exec_time=self.exec_time,
+            root_exec_time=self.root_exec_time
+        )
 
 
 @dataclass

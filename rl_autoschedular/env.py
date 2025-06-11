@@ -25,11 +25,14 @@ from rl_autoschedular.transforms import (
 )
 from rl_autoschedular.evaluation import (
     evaluate_code_with_bindings_and_timeout,
-    evaluate_code_with_cmd_and_timeout
+    evaluate_code_with_cmd_and_timeout,
+    get_cached_execution_time,
+    set_cached_execution_time
 )
 from utils.log import print_alert, print_info, print_success, print_error
+import copy
 
-def train_eval_split(eval_size: float = 0.2):
+def train_eval_split(json_data : Optional[list[tuple[str, dict]]] = None, eval_size: float = 0.2):
     """Split the json data into two environment sets training and evaluation sets.
 
     Args:
@@ -41,10 +44,11 @@ def train_eval_split(eval_size: float = 0.2):
     if cfg.data_format == "mlir":
         raise ValueError("The data format is not supported for this function. Please use json data format.")
     
-    with open(cfg.json_file, "r") as file:
-        json_data = json.load(file)
-    
-    json_data = list(json_data.items())
+    if json_data is None:
+        with open(cfg.json_file, "r") as file:
+            json_data = json.load(file)
+            json_data = list(json_data.items())
+
     random.shuffle(json_data)
 
     # Split the benchmarks data into training and evaluation sets
@@ -82,7 +86,9 @@ class Env:
     tmp_file: str
     """The temporary file to store the intermediate representations."""
 
-    def __init__(self, reset_repeat: int = 1, step_repeat: int = 1, tmp_file: Optional[str] = None, env_json_data: Optional[list[tuple[str, dict]]] = None):
+    def __init__(self, reset_repeat: int = 1, step_repeat: int = 1, tmp_file: Optional[str] = None,
+                 benchmark_data: list[BenchmarkFeatures] = None,
+                 env_json_data: Optional[list[tuple[str, dict]]] = None):
         """Initialize the environment.
 
         Args:
@@ -94,8 +100,8 @@ class Env:
         # Generate a random file to be used in order to apply the transformations and evaluate the code
         # This is done in order to enable having multiple experiments at the same time, by letting each
         # experiment use a separate unique file to read and write intermediate representations
-        random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
         if tmp_file is None:
+            random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=15))
             tmp_file = f"tmp/{random_str}.mlir"
         with open(tmp_file, "w") as file:
             file.write("")
@@ -108,49 +114,61 @@ class Env:
 
         # Get benchmarks data
         self.benchmarks_data = []
-        if cfg.data_format == "mlir":
-            # Load execution times from json file
-            with open(cfg.json_file, "r") as file:
-                benchmarks_json: dict[str, float] = json.load(file)
-            # Build benchmark features
-            for bench_name, exec_time in benchmarks_json.items():
-                bench_file = os.path.join(cfg.benchmarks_folder_path, bench_name + ".mlir")
-                benchmark_data = extract_bench_features_from_file(bench_name, bench_file, exec_time * 10**9, exec_time * 10**9)
-                self.benchmarks_data.append((bench_name, benchmark_data))
-        else:
-            # Load operations data from json file
-            if env_json_data is None:
+        if benchmark_data is None:
+            if cfg.data_format == "mlir":
+                # Load execution times from json file
                 with open(cfg.json_file, "r") as file:
-                    json_data = json.load(file)
-            else:
-                json_data = {op: detail for op, detail in env_json_data}
-
-            operation_filter = [
-                'linalg.matmul',
-                'linalg.conv_2d',
-                'pooling',
-                'generic',
-                'linalg.add',
-                "func.call",
-                'bench'
-            ]
-
-            json_data = [(op, details) for op, details in json_data.items() if any([s in op for s in operation_filter])]
-            # json_data = [(details['operation'], details) for _, details in json_data.items()]
-
-
-            # Get the AST of the MLIR code and give a tag to each linalg operation
-            for i in tqdm(range(len(json_data))):
-                # Get full MLIR code and execution time
-                code = json_data[i][1]["transform_wrapped_operation"]
-                exec_time = json_data[i][1]["execution_time"]
+                    benchmarks_json: dict[str, float] = json.load(file)
                 # Build benchmark features
-                bench_name = json_data[i][0]
-                benchmark_data = extract_bench_features_from_code(bench_name, code, exec_time, exec_time)
-                self.benchmarks_data.append((bench_name, benchmark_data))
+                for bench_name, exec_time in benchmarks_json.items():
+                    bench_file = os.path.join(cfg.benchmarks_folder_path, bench_name + ".mlir")
+                    benchmark_data = extract_bench_features_from_file(bench_name, bench_file, exec_time * 10**9, exec_time * 10**9)
+                    self.benchmarks_data.append((bench_name, benchmark_data))
+            else:
+                # Load operations data from json file
+                if env_json_data is None:
+                    with open(cfg.json_file, "r") as file:
+                        json_data = json.load(file)
+                else:
+                    json_data = {op: detail for op, detail in env_json_data}
+
+                operation_filter = [
+                    'linalg.matmul',
+                    'linalg.conv_2d',
+                    'pooling',
+                    'generic',
+                    'linalg.add',
+                    "func.call",
+                    'bench'
+                ]
+
+                json_data = [(op, details) for op, details in json_data.items() if any([s in op for s in operation_filter])]
+                # json_data = [(details['operation'], details) for _, details in json_data.items()]
+
+
+                # Get the AST of the MLIR code and give a tag to each linalg operation
+                for i in tqdm(range(len(json_data))):
+                    # Get full MLIR code and execution time
+                    code = json_data[i][1]["transform_wrapped_operation"]
+                    exec_time = json_data[i][1]["execution_time"]
+                    # Build benchmark features
+                    bench_name = json_data[i][0]
+                    benchmark_data = extract_bench_features_from_code(bench_name, code, exec_time, exec_time)
+                    self.benchmarks_data.append((bench_name, benchmark_data))
+        else:
+            self.benchmarks_data = benchmark_data
 
         self.reset_repeat = reset_repeat
         self.step_repeat = step_repeat
+
+    def copy(self):
+        """Create a deep copy of the environment, including benchmarks data and configuration."""
+        new_env = Env(
+            reset_repeat=self.reset_repeat,
+            step_repeat=self.step_repeat,
+            benchmark_data=copy.deepcopy(self.benchmarks_data)
+        )
+        return new_env
 
     def get_operation_type(self,raw_operation):
         operation_type = "unknown"
@@ -292,6 +310,7 @@ class Env:
             Optional[OperationState]: The final state of the environment if the episode is done.
         """
         if state.step_count == 0:
+            print("")
             print(f"Operation: {state.bench_name} - {state.operation_tag}")
             print(f"Operation type: {state.operation_type}")
 
@@ -470,12 +489,12 @@ class Env:
             # We keep the same code as previously
             # We get a penalty of -5
             print_error(f'FAILED TRANSFORM: {transformation} {parameters} {state.transformation_history}')
-            if transformation in ["vectorization", "fusion"]:
-                # This will create the file if it doesn't exist, or overwrite it if it does
-                # TODO IMPORTANT: bug could raise if bench_name is too big
-                with open(f'./errors_files/{bench_data.bench_name}_{state.operation_tag}.mlir', 'w') as f:
-                    f.write(f"# Error in the transformation {transformation}, {parameters}, {state.transformation_history}\n")
-                    f.write(state.transformed_code)
+            # if transformation in ["vectorization", "fusion"]:
+            #     # This will create the file if it doesn't exist, or overwrite it if it does
+            #     # TODO IMPORTANT: bug could raise if bench_name is too big
+            #     with open(f'./errors_files/{bench_data.bench_name}_{state.operation_tag}.mlir', 'w') as f:
+            #         f.write(f"# Error in the transformation {transformation}, {parameters}, {state.transformation_history}\n")
+            #         f.write(state.transformed_code)
 
             transformed_code = state.transformed_code
             reward -= 5        
@@ -531,11 +550,9 @@ class Env:
                     trans_failed = True
 
                 speedup_metric = state.exec_time / new_exec_time
-                print("\n")
-                print(state.transformation_history + [(transformation, parameters)])
                 print('-' * 30)
                 print(f"Operation: {self.bench_index} - {state.operation_tag}")
-                print(state.transformation_history)
+                print(state.transformation_history + [(transformation, parameters)])
                 print('Relative speedup:', speedup_metric)
                 print('root Exec time:', state.root_exec_time * 10**-9, 's')
                 print('Old Exec time:', state.exec_time * 10**-9, 's')
@@ -656,7 +673,16 @@ class Env:
 
         return next_obs, reward, done, next_state, final_state
 
-    def evaluate_step(self, transformed_code, next_state, transformation, parameters, reward=0):
+    def evaluate_step(self, transformed_code, next_state: OperationState, transformation, parameters, reward=0):
+        new_exec_time = get_cached_execution_time(transformed_code)
+        
+        if new_exec_time is not None:
+            print_success("Cache hit")
+            reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
+            return reward, new_exec_time, False
+
+        print_alert("Cache miss")
+
         # Execute and evaluate the code
         if cfg.use_bindings:
             new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, timeout=200)
@@ -672,6 +698,7 @@ class Env:
                 # We calculate the speedup
                 reward += self.speedup_reward(new_exec_time, next_state.root_exec_time)
                 # next_state.exec_time = new_exec_time
+                set_cached_execution_time(transformed_code, new_exec_time)
             else:
                 reward -= 20
                 print_error("ASSERTION FAILED")
@@ -1156,7 +1183,7 @@ class ParallelEnv:
     envs: list[Env]
     """list of environments."""
 
-    def __init__(self, num_env: int = 1, reset_repeat: int = 1, step_repeat: int = 1, env_json_data: list[tuple[str, dict]] = None):
+    def __init__(self, num_env: int = 1, reset_repeat: int = 1, step_repeat: int = 1, envs: list[Env] = None, env_json_data: list[tuple[str, dict]] = None):
         """Initialize parallel environments.
 
         Args:
@@ -1166,13 +1193,17 @@ class ParallelEnv:
             env_json_data (list[tuple[str, dict]]): The json data for the environments. Defaults to None.
         """
         self.num_env = num_env
-        self.envs = [
-            Env(
-                env_json_data=env_json_data,
-                reset_repeat=reset_repeat,
-                step_repeat=step_repeat
-            ) for _ in range(num_env)
-        ]
+        if envs is None:
+            self.envs = [
+                Env(
+                    env_json_data=env_json_data,
+                    reset_repeat=reset_repeat,
+                    step_repeat=step_repeat
+                ) for _ in range(num_env)
+            ]
+
+        else:
+            self.envs = envs
 
     def reset(self, idx: Optional[int] = None):
         """Reset the environments.
@@ -1220,3 +1251,12 @@ class ParallelEnv:
             batch_final_state.append(final_state)
 
         return batch_next_obs, batch_reward, batch_done, batch_next_state, batch_final_state
+
+    def copy(self):
+        """Create a deep copy of the ParallelEnv, including all underlying Env instances."""
+        return ParallelEnv(
+            num_env=self.num_env,
+            reset_repeat=self.envs[0].reset_repeat,
+            step_repeat=self.envs[0].step_repeat,
+            envs = self.envs
+        )

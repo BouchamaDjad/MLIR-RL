@@ -1015,32 +1015,33 @@ def relu(*args):
 
         if len(args[0]) == 4:   
             N,C,W,W_ = tuple(args[0])
+            dim = 4
 
             if W != W_:
                 raise Exception("Skipped")
 
-        if len(args[0]) == 2:
+        elif len(args[0]) == 2:
             N,S = tuple(args[0])
+            dim = 2
+        
         else:
             raise Exception("Skipped")
-
     else: 
         if random() < 0.25:
             N = choice(BATCH_SIZES)
             S = choice(CHANNELS)
-            
-            SHAPE = f"{N}x{S}"
+
             dim = 2
 
         else:
             N = choice(BATCH_SIZES)
             C = choice(CHANNELS)
             W = choice(HEIGHTS)
-            
-            SHAPE = f"{N}x{C}x{W}x{W}"
+        
             dim = 4
 
     if dim == 2:
+        SHAPE = f"{N}x{S}"
         
         relu_maps = """
         #map2 = affine_map<(d0, d1) -> (d0, d1)>
@@ -1057,7 +1058,8 @@ def relu(*args):
         """.strip().replace('SHAPE', SHAPE)
         
     else:
-    
+        SHAPE = f"{N}x{C}x{W}x{W}"
+        
         relu_maps = """
         #map = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
         #map2 = affine_map<(d0, d1, d2, d3) -> (0, d1, d2, d3)>

@@ -21,7 +21,7 @@ from rl_autoschedular.transforms import (
     get_ops_by_tags,
     apply_conv2d_decomposition,
     transform_dialect_fuse_only,
-    transform_dialect_vectorise_with_vectorizer
+    transform_dialect_vectorize_with_vectorizer
 )
 from rl_autoschedular.evaluation import (
     evaluate_code_with_bindings_and_timeout,
@@ -341,12 +341,12 @@ class Env:
             # Apply the transformation and get the new code
             transformed_code = apply_transformation_with_timeout(
                 state=state,
-                bench_features=bench_data,
+                # bench_features=bench_data,
                 code=state.transformed_code,
                 transformation=transformation,
                 parameters=parameters,
                 timeout=20,
-                use_vectorizer=cfg.use_vectorizer
+                # use_vectorizer=cfg.use_vectorizer
             )
 
             # SPECIAL CASE:
@@ -403,7 +403,7 @@ class Env:
                        
                        if new_code:
                            # if fusion succesful apply vectorisation
-                           new_code = transform_dialect_vectorise_with_vectorizer(new_code, producer_tag, state.tmp_file)
+                           new_code = transform_dialect_vectorize_with_vectorizer(new_code, producer_tag, state.tmp_file)
                            
                            if new_code:
                                # both fusion and vect are successful update the code
@@ -456,12 +456,12 @@ class Env:
                 if not skip_decomp:               
                     state.transformed_code = apply_transformation_with_timeout(
                         state=state,
-                        bench_features=bench_data,
+                        # bench_features=bench_data,
                         code=state.transformed_code,
                         transformation='tiling',
                         parameters=second_interchange_parameters,
                         timeout=20,
-                        use_vectorizer=cfg.use_vectorizer
+                        # use_vectorizer=cfg.use_vectorizer
                     )
 
                     state.transformed_code = apply_conv2d_decomposition(state.transformed_code, state.operation_tag, self.tmp_file)
@@ -476,12 +476,12 @@ class Env:
                 # Otherwise apply the transformation and get the new code
                 transformed_code = apply_transformation_with_timeout(
                     state=state,
-                    bench_features=bench_data,
+                    # bench_features=bench_data,
                     code=state.transformed_code,
                     transformation=transformation,
                     parameters=parameters,
                     timeout=20,
-                    use_vectorizer=cfg.use_vectorizer
+                    # use_vectorizer=cfg.use_vectorizer
                 )
                                                       
         trans_failed = not transformed_code  # This indicates that the transformation failed or timed out
@@ -862,7 +862,7 @@ class Env:
         if operation_type == 'conv_2d':
             action_mask[:TP_BEGIN] = [False, False, False, False, False, True, False]
         else:
-            action_mask[:TP_BEGIN] = [True, True, True, True, False, False, True]
+            action_mask[:TP_BEGIN] = [cfg.force_optimization, True, True, True, False, False, True]
             # action_mask[:5] = [False, True, True, True, False]
         action_mask[TP_BEGIN + num_loops:T_BEGIN] = False
         action_mask[T_BEGIN + num_loops:TF_BEGIN] = False

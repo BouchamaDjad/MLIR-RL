@@ -11,7 +11,7 @@ from mlir.passmanager import PassManager
 from typing import Union, Optional
 import multiprocessing
 from rl_autoschedular import config as cfg
-from utils.log import print_error
+from utils.log import print_alert, print_error
 
 def get_cached_execution_time(transformed_code: str) -> Optional[int]:
     if not cfg.cache_file:
@@ -62,7 +62,7 @@ def evaluate_code_with_bindings(code: str) -> tuple[Optional[int], bool]:
             bufferize-function-boundaries
             function-boundary-type-conversion=identity-layout-map
         },
-        convert-vector-to-scf,
+
         convert-linalg-to-loops,
         buffer-deallocation-pipeline,
         convert-bufferization-to-memref,
@@ -132,11 +132,10 @@ def evaluate_code_with_bindings_wrapper(code: str, exec_times, assertions):
     """
     try:
         exec_time, assertion = evaluate_code_with_bindings(code)
+        exec_times.append(exec_time)
+        assertions.append(assertion)
     except:
         traceback.print_exc()        
-
-    exec_times.append(exec_time)
-    assertions.append(assertion)
 
 def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float]) -> tuple[Optional[int], bool]:
     """Evaluates the given MLIR code using Python bindings with a timeout.
@@ -161,7 +160,7 @@ def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float])
         # The function is still running, terminate the process
         process.terminate()
         process.join()
-
+        print_alert("timeout")
         return None, False
     else:
         # The function completed within the timeout

@@ -73,7 +73,7 @@ if cfg.data_format == "json":
             reset_repeat=1,
             step_repeat=1,
             # In case you will train on single-operations evaluation set (mentioned in the paper)
-            # env_json_data = list(json.load(open("data/nn/eval_operations.json")).items())
+            # env_json_data = list(json.load(open("eval.json")).items())
         ) 
 
 else:

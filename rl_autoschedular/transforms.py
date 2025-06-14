@@ -2,15 +2,15 @@ import os
 import re
 import subprocess
 from typing import Optional
-from rl_autoschedular.observation import extract_bench_features_from_code
-from utils.log import print_alert
+from utils.log import print_alert, print_error
 from rl_autoschedular import config as cfg
-from rl_autoschedular.state import OperationState, NestedLoopFeatures, BenchmarkFeatures
+from rl_autoschedular.state import OperationState
+import multiprocessing
 
 
 # ====================================== Transform dialect functions ======================================
 
-def transform_dialect_TP(code: str, operation_tag: str, tiling_size: list[int], nested_loops_features: list[NestedLoopFeatures], tmp_file_path: str):
+def transform_dialect_TP(code: str, operation_tag: str, tiling_sizes: list[int], tmp_file_path: str):
     """Apply the tiling and parallelization transformation to the specified operation in the given code.
 
     Args:
@@ -22,42 +22,21 @@ def transform_dialect_TP(code: str, operation_tag: str, tiling_size: list[int], 
     Returns:
         str: The code after applying the transformation.
     """
-    if not tiling_size:
-        return ''
-    if all([a == 0 for a in tiling_size]):
+    if not code:
+        return code
+
+    # If tiling sizes are all zeros, means no tiling is needed
+    if all([a == 0 for a in tiling_sizes]):
         return code
 
     code = code.strip()
-
-    # Set tiling with parallelization for loops that can be parallelized
-    parallel_tiling_sizes = [0 if nested_loops_features[i].iterator_type == "reduction" else tiling_size[i] for i in range(len(tiling_size))]
-    if any([a != 0 for a in parallel_tiling_sizes]):
-        parallel_transform_dialect_code = (
-            f'    %parallel_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-            f'    %parallel_tiled_{operation_tag}, %forall_{operation_tag} = transform.structured.tile_using_forall %parallel_{operation_tag} tile_sizes {str(parallel_tiling_sizes)} : (!transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
-        )
-    else:
-        parallel_transform_dialect_code = ''
-
-    # Set tiling only for reduction loops
-    only_tiling_sizes = [tiling_size[i] if nested_loops_features[i].iterator_type == "reduction" else 0 for i in range(len(tiling_size))]
-    if any([a != 0 for a in only_tiling_sizes]):
-        n_loops = sum([s != 0 for s in only_tiling_sizes])
-        r = ', '.join(['!transform.any_op'] * n_loops)
-
-        only_tiling_transform_dialect_code = (
-            f'    %reduction_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
-            f'    %reduction_tiled_{operation_tag}, %loops_{operation_tag}:{n_loops} = transform.structured.tile_using_for %reduction_{operation_tag} tile_sizes {str(only_tiling_sizes)} : (!transform.any_op) -> (!transform.any_op, {r})\n'
-        )
-    else:
-        only_tiling_transform_dialect_code = ''
 
     # Add full transform dialect code into the main code
     transform_dialect_code = (
         f'\nmodule attributes {{transform.with_named_sequence}} {{\n'
         f'  transform.named_sequence @__transform_main(%arg1: !transform.any_op {{transform.readonly}}) {{\n'
-        f'{parallel_transform_dialect_code}'
-        f'{only_tiling_transform_dialect_code}'
+        f'    %op_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %arg1 : (!transform.any_op) -> !transform.any_op\n'
+        f'    %op_tiled_{operation_tag}, %forall_{operation_tag} = transform.structured.tile_using_forall %op_{operation_tag} tile_sizes {str(tiling_sizes)} : (!transform.any_op) -> (!transform.any_op, !transform.any_op)\n'
         f'    transform.yield\n'
         f'  }}\n'
         f'}}'
@@ -90,8 +69,10 @@ def transform_dialect_tile(code: str, operation_tag: str, tiling_size: list[int]
     Returns:
         str: The code after applying the transformation.
     """
-    if not tiling_size:
-        return ''
+    if not code:
+        return code
+
+    # If tiling sizes are all zeros, means no tiling is needed
     if all([a == 0 for a in tiling_size]):
         return code
 
@@ -138,7 +119,11 @@ def transform_dialect_interchange(code: str, operation_tag: str, interchange_lis
     Returns:
         str: The code after applying the transformation.
     """
-    if not interchange_list:
+    if not code:
+        return code
+
+    # If the permutation list is same as the identity permutation, means no interchange is needed
+    if interchange_list == list(range(len(interchange_list))):
         return code
 
     code = code.strip()
@@ -258,7 +243,7 @@ def transform_dialect_fuse_only(code, consumer_tag, producer_tag, tmp_file):
 
 
 
-def transform_dialect_vectorise_img2col(code: str, operation_tag: str, tmp_file_path: str):
+def transform_dialect_vectorize_img2col(code: str, operation_tag: str, tmp_file_path: str):
     """Apply the vectorization transformation with img2col to the specified operation in the given code.
 
     Args:
@@ -269,6 +254,8 @@ def transform_dialect_vectorise_img2col(code: str, operation_tag: str, tmp_file_
     Returns:
         str: The code after applying the transformation.
     """
+    if not code:
+        return code
 
     code = code.strip()
 
@@ -350,7 +337,7 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
     return result
 
 
-def transform_dialect_vectorise(code: str, operation_tag: str, tmp_file_path: str):
+def transform_dialect_vectorize_children(code: str, operation_tag: str, tmp_file_path: str):
     """Apply the vectorization transformation to the specified operation in the given code.
 
     Args:
@@ -361,30 +348,38 @@ def transform_dialect_vectorise(code: str, operation_tag: str, tmp_file_path: st
     Returns:
         str: The code after applying the transformation.
     """
+    if not code:
+        return code
 
     code = code.strip()
 
-    transform_dialect_code = f"""
-module attributes {{transform.with_named_sequence}} {{
-transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{transform.readonly}})
-{{
+    transform_dialect_code = """
+    module attributes {transform.with_named_sequence} {
+        transform.named_sequence @__transform_main(%variant_op: !transform.any_op {transform.readonly})
+        {
+            %forall_op = transform.structured.match ops{["scf.forall"]}  in %variant_op : (!transform.any_op) -> !transform.any_op
 
-  // %conv_gen_2 = transform.structured.match attributes{{tag = "{operation_tag}"}} in %variant_op : (!transform.any_op) -> !transform.any_op
-  // %forall_op = transform.get_parent_op %conv_gen_2: (!transform.any_op) -> !transform.any_op
+            %original_fill = transform.structured.match ops{["linalg.fill"]} in %variant_op : (!transform.any_op) -> !transform.any_op
+            transform.structured.fuse_into_containing_op %original_fill into %forall_op : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)
 
-  %forall_op = transform.structured.match ops{{["scf.forall"]}}  in %variant_op : (!transform.any_op) -> !transform.any_op
+            %func = transform.structured.match ops{["func.func"]} in %variant_op: (!transform.any_op) -> !transform.any_op
+            %func_0 = transform.structured.vectorize_children_and_apply_patterns %func {vectorize_padding}: (!transform.any_op) -> (!transform.any_op)
 
+            transform.apply_patterns to %func_0 {
+                transform.apply_patterns.vector.lower_contraction lowering_strategy = "outerproduct"
+                transform.apply_patterns.vector.transfer_permutation_patterns
+                transform.apply_patterns.vector.lower_multi_reduction lowering_strategy = "innerparallel"
+                transform.apply_patterns.vector.split_transfer_full_partial split_transfer_strategy = "vector-transfer"
+                transform.apply_patterns.vector.transfer_to_scf max_transfer_rank = 1 full_unroll = true
+                transform.apply_patterns.vector.lower_transfer max_transfer_rank = 1
+                transform.apply_patterns.vector.lower_shape_cast
+                transform.apply_patterns.vector.lower_transpose lowering_strategy = "shuffle_1d"
+                transform.apply_patterns.canonicalization
+            } : !transform.any_op
 
-  %original_fill = transform.structured.match ops{{["linalg.fill"]}} in %variant_op : (!transform.any_op) -> !transform.any_op
-  transform.structured.fuse_into_containing_op %original_fill into %forall_op : (!transform.any_op, !transform.any_op) -> (!transform.any_op, !transform.any_op)
-
-  %func = transform.structured.match ops{{["func.func"]}} in %variant_op: (!transform.any_op) -> !transform.any_op
-  %func_0 = transform.structured.vectorize_children_and_apply_patterns %func {{vectorize_padding}}: (!transform.any_op) -> (!transform.any_op)
-
-  transform.yield
-}}
-}}
-""".strip()
+            transform.yield
+        }
+    }""".strip()
 
     code = code + '\n' + transform_dialect_code + '\n'
 
@@ -402,7 +397,7 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
     return result
 
 
-def transform_dialect_vectorise_with_vectorizer(code: str, operation_tag: str, tmp_file_path: str):
+def transform_dialect_vectorize_with_vectorizer(code: str, operation_tag: str, tmp_file_path: str):
     """Apply the vectorization transformation with vectorizer to the specified operation in the given code.
 
     Args:
@@ -413,6 +408,8 @@ def transform_dialect_vectorise_with_vectorizer(code: str, operation_tag: str, t
     Returns:
         str: The code after applying the transformation.
     """
+    if not code:
+        return code
 
     code = code.strip()
 
@@ -425,13 +422,74 @@ def transform_dialect_vectorise_with_vectorizer(code: str, operation_tag: str, t
     )
     vect_code = vect_code_process.stdout.decode('utf-8')
 
+    if vect_code_process.returncode != 0:
+        print_error(f"Vectorizer failed with error: {vect_code_process.stderr.decode('utf-8')}")
+        return ''
+
     # If vectorizer succeeded apply vectorization patterns else return empty string
-    if vect_code:
-        transform_dialect_code = """
-    module attributes {transform.with_named_sequence} {
-        transform.named_sequence @__transform_main(%variant_op: !transform.any_op {transform.readonly}) {
-            %f = transform.structured.match ops{[\"func.func\"]} in %variant_op : (!transform.any_op) -> !transform.any_op
-            transform.apply_patterns to %f {
+    if not vect_code:
+        return ''
+    
+    
+    transform_dialect_code = """
+module attributes {transform.with_named_sequence} {
+    transform.named_sequence @__transform_main(%variant_op: !transform.any_op {transform.readonly}) {
+        %f = transform.structured.match ops{[\"func.func\"]} in %variant_op : (!transform.any_op) -> !transform.any_op
+        transform.apply_patterns to %f {
+            transform.apply_patterns.vector.lower_contraction lowering_strategy = "outerproduct"
+            transform.apply_patterns.vector.transfer_permutation_patterns
+            transform.apply_patterns.vector.lower_multi_reduction lowering_strategy = "innerparallel"
+            transform.apply_patterns.vector.split_transfer_full_partial split_transfer_strategy = "vector-transfer"
+            transform.apply_patterns.vector.transfer_to_scf max_transfer_rank = 1 full_unroll = true
+            transform.apply_patterns.vector.lower_transfer max_transfer_rank = 1
+            transform.apply_patterns.vector.lower_shape_cast
+            transform.apply_patterns.vector.lower_transpose lowering_strategy = "shuffle_1d"
+            transform.apply_patterns.canonicalization
+        } : !transform.any_op
+        transform.yield
+    }
+}""".strip()
+
+    full_code = vect_code + '\n' + transform_dialect_code + '\n'
+
+    with open(tmp_file_path, "w") as file:
+        file.write(full_code)
+
+    result = os.popen(
+        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+    ).read()
+
+    result = result.replace("module {\n", "", 1)
+    result = ''.join(result.rsplit('\n}\n', 1))
+    result = re.sub(r"module attributes \{transform.with_named_sequence\} \{\s+\}", "", result)
+
+    return result
+
+
+def transform_dialect_vectorize(code: str, operation_tag: str, tmp_file_path: str):
+    """Apply the vectorization transformation with vectorizer to the specified operation in the given code.
+
+    Args:
+        code (str): The code to apply the transformation to.
+        operation_tag (str): The tag of the operation to apply the transformation to.
+        tmp_file_path (str): The path to the temporary file to write the code to.
+
+    Returns:
+        str: The code after applying the transformation.
+    """
+    if not code:
+        return code
+
+    code = code.strip()
+
+    transform_dialect_code = f"""
+    module attributes {{transform.with_named_sequence}} {{
+        transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{transform.readonly}}) {{
+            %op_{operation_tag} = transform.structured.match attributes{{tag = "{operation_tag}"}} in %variant_op : (!transform.any_op) -> !transform.any_op
+            transform.structured.vectorize %op_{operation_tag} : !transform.any_op
+
+            %f = transform.structured.match ops{{[\"func.func\"]}} in %variant_op : (!transform.any_op) -> !transform.any_op
+            transform.apply_patterns to %f {{
                 transform.apply_patterns.vector.lower_contraction lowering_strategy = "outerproduct"
                 transform.apply_patterns.vector.transfer_permutation_patterns
                 transform.apply_patterns.vector.lower_multi_reduction lowering_strategy = "innerparallel"
@@ -441,27 +499,25 @@ def transform_dialect_vectorise_with_vectorizer(code: str, operation_tag: str, t
                 transform.apply_patterns.vector.lower_shape_cast
                 transform.apply_patterns.vector.lower_transpose lowering_strategy = "shuffle_1d"
                 transform.apply_patterns.canonicalization
-            } : !transform.any_op
+            }} : !transform.any_op
             transform.yield
-        }
-    }""".strip()
+        }}
+    }}""".strip()
 
-        full_code = vect_code + '\n' + transform_dialect_code + '\n'
+    full_code = code + '\n' + transform_dialect_code + '\n'
 
-        with open(tmp_file_path, "w") as file:
-            file.write(full_code)
+    with open(tmp_file_path, "w") as file:
+        file.write(full_code)
 
-        result = os.popen(
-            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-        ).read()
+    result = os.popen(
+        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+    ).read()
 
-        result = result.replace("module {\n", "", 1)
-        result = ''.join(result.rsplit('\n}\n', 1))
-        result = re.sub(r"module attributes \{transform.with_named_sequence\} \{\s+\}", "", result)
+    result = result.replace("module {\n", "", 1)
+    result = ''.join(result.rsplit('\n}\n', 1))
+    result = re.sub(r"module attributes \{transform.with_named_sequence\} \{\s+\}", "", result)
 
-        return result
-    else:
-        return ''
+    return result
 
 
 def transform_dialect_img2col(code: str, operation_tag: str, tmp_file_path: str):
@@ -475,6 +531,8 @@ def transform_dialect_img2col(code: str, operation_tag: str, tmp_file_path: str)
     Returns:
         str: The code after applying the transformation.
     """
+    if not code:
+        return code
 
     code = code.strip()
 
@@ -511,62 +569,66 @@ module attributes {{transform.with_named_sequence}} {{
     return result
 
 
-def apply_transformation(state: OperationState, bench_features: BenchmarkFeatures, code: str, transformation: str, parameters: list, use_vectorizer: bool = False):
+def apply_transformation(state: OperationState, code: str, transformation: str, parameters: list) -> str:
     """Apply the specified transformation to the given code.
 
     Args:
         state (OperationState): The operation state.
-        bench_features (BenchmarkFeatures): The benchmark features.
         code (str): The code to apply the transformation to.
         transformation (str): The transformation to apply.
         parameters (list): The parameters of the transformation.
-        use_vectorizer (bool): Whether to use the vectorizer or not.
 
     Returns:
         str: The code after applying the transformation.
     """
-
     tmp_file = state.tmp_file
 
     code = code.strip()
 
-    # Re-extract loop data if it's gonna be needed afterwards
-    # if transformation in ['parallelization', 'vectorization']:
-    #     new_benchmark_features = extract_bench_features_from_code(state.bench_name, code, bench_features.root_exec_time, state.exec_time)
-    #     operation_features = new_benchmark_features.operations[state.operation_tag]
-
-    operation_features = state.operation_features
-
     if transformation == 'tiling':
         if not parameters:
             print_alert("REASON: No parameters")
-            return ''
+            return ''    
+        
         new_code = transform_dialect_tile(code, state.operation_tag, parameters, tmp_file)
+    
     elif transformation == 'parallelization':
         if not parameters:
             print_alert("REASON: No parameters")
             return ''
-        new_code = transform_dialect_TP(code, state.operation_tag, parameters, state.operation_features.nested_loops, tmp_file)
+
+        parallel_params = [0 if state.operation_features.nested_loops[i].iterator_type == "reduction" else parameters[i] for i in range(len(parameters))]
+        tiling_params = [parameters[i] if state.operation_features.nested_loops[i].iterator_type == "reduction" else 0 for i in range(len(parameters))]
+        new_code = transform_dialect_tile(code, state.operation_tag, tiling_params, tmp_file)
+        new_code = transform_dialect_TP(new_code, state.operation_tag, parallel_params, tmp_file)
+    
     elif transformation == 'interchange':
+        if not parameters:
+            print_alert("REASON: No parameters")
+            return ''
+        
         new_code = transform_dialect_interchange(code, state.operation_tag, parameters, tmp_file)
+
     elif transformation == 'img2col':
         new_code = transform_dialect_img2col(code, state.operation_tag, tmp_file)
+
+    
     elif transformation == 'vectorization':
         # If the operation isn't small enough for vectorization, ignore the transformation
         if cfg.vect_size_limit > 0:
             op_iter_space = 1
-            for nested_loop in operation_features.nested_loops:
+            for nested_loop in state.operation_features.nested_loops:
                 op_iter_space *= nested_loop.upper_bound
             if op_iter_space > cfg.vect_size_limit:
                 print_alert(f"REASON: Too large to vectorize {op_iter_space} > {cfg.vect_size_limit}")
                 return ''
 
-        if use_vectorizer:
-            new_code = transform_dialect_vectorise_with_vectorizer(code, state.operation_tag, tmp_file)
+        if cfg.use_vectorizer:
+            new_code = transform_dialect_vectorize_with_vectorizer(code, state.operation_tag, tmp_file)
         elif state.operation_type == 'conv_2d+img2col':
-            new_code = transform_dialect_vectorise_img2col(code, state.operation_tag, tmp_file)
+            new_code = transform_dialect_vectorize_img2col(code, state.operation_tag, tmp_file)
         else:
-            new_code = transform_dialect_vectorise(code, state.operation_tag, tmp_file)
+            new_code = transform_dialect_vectorize(code, state.operation_tag, tmp_file)
     
     elif transformation == "fusion":
         if not parameters:
@@ -590,54 +652,48 @@ def apply_transformation(state: OperationState, bench_features: BenchmarkFeature
     return new_code
 
 
-def apply_transformation_wrapper(state: OperationState, bench_features: BenchmarkFeatures, code: str, transformation: str, parameters: list, return_list, use_vectorizer: bool = False):
+def apply_transformation_wrapper(state: OperationState, code: str, transformation: str, parameters: list, return_list):
     """Wrapper function to apply the transformation with multiprocessing.
 
     Args:
         state (OperationState): The operation state.
-        bench_features (BenchmarkFeatures): The benchmark features.
         code (str): The code to apply the transformation to.
         transformation (str): The transformation to apply.
         parameters (list): The parameters of the transformation.
         return_list (list): The list to store the result of the transformation.
-        use_vectorizer (bool): Whether to use the vectorizer or not. Default is False.
     """
-    res = apply_transformation(state, bench_features, code, transformation, parameters, use_vectorizer)
+    res = apply_transformation(state, code, transformation, parameters)
     return_list.append(res)
 
 
-def apply_transformation_with_timeout(state: OperationState, bench_features: BenchmarkFeatures, code: str, transformation: str, parameters: list, timeout: Optional[float] = None, use_vectorizer: bool = False):
+def apply_transformation_with_timeout(state: OperationState, code: str, transformation: str, parameters: list, timeout: Optional[float] = 20) -> str:
     """Apply the specified transformation to the given code with a timeout.
 
     Args:
         state (OperationState): The operation state.
-        bench_features (BenchmarkFeatures): The benchmark features.
         code (str): The code to apply the transformation to.
         transformation (str): The transformation to apply.
         parameters (list): The parameters of the transformation.
         timeout (int): The timeout in seconds.
-        use_vectorizer (bool): Whether to use the vectorizer or not.
 
     Returns:
         str: The code after applying the transformation.
     """
-    # manager = multiprocessing.Manager()
-    # return_list = manager.list()
-    # process = multiprocessing.Process(target=apply_transformation_wrapper, args=(state, code, transformation, parameters, return_list, from_lqcd))
-    # process.start()
-    # process.join(timeout)
+    manager = multiprocessing.Manager()
+    return_list = manager.list()
+    process = multiprocessing.Process(target=apply_transformation_wrapper, args=(state, code, transformation, parameters, return_list))
+    process.start()
+    process.join(timeout)
 
-    # if process.is_alive():
-    #     # The function is still running, terminate the process
-    #     process.terminate()
-    #     process.join()
+    if process.is_alive():
+        # The function is still running, terminate the process
+        process.terminate()
+        process.join()
 
-    #     return None
-    # else:
-    #     # The function completed within the timeout
-    #     return return_list[0]
-
-    return apply_transformation(state, bench_features, code, transformation, parameters, use_vectorizer)
+        return None
+    else:
+        # The function completed within the timeout
+        return return_list[0]
 
 
 # ========================================= Other functions =========================================

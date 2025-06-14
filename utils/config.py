@@ -16,6 +16,8 @@ class Config(metaclass=Singleton):
     """The number of tile sizes"""
     num_transformations: int
     """The number of transformations"""
+    force_optimization: bool
+    """Flag that forces the model to apply at least one optimization on every operation"""
     vect_size_limit: int
     """Vectorization size limit to prevent large sizes vectorization"""
     openmp_num_threads : int
@@ -67,6 +69,7 @@ class Config(metaclass=Singleton):
         self.max_num_load_store_dim = 7
         self.num_tile_sizes = 7
         self.num_transformations = 5
+        self.force_optimization = False
         self.vect_size_limit = 512
         self.openmp_num_threads = 8
         self.use_bindings = False
@@ -100,6 +103,7 @@ class Config(metaclass=Singleton):
         self.max_num_load_store_dim = config["max_num_load_store_dim"]
         self.num_tile_sizes = config["num_tile_sizes"]
         self.num_transformations = config["num_transformations"]
+        self.force_optimization = config["force_optimization"]
         self.vect_size_limit = config["vect_size_limit"]
         self.openmp_num_threads = config["openmp_num_threads"]
         self.use_bindings = config["use_bindings"]
@@ -125,7 +129,7 @@ class Config(metaclass=Singleton):
         assert self.train_eval_split >= 0 and self.train_eval_split <= 1, "train_eval_split should be between 0 and 1."
         assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
         assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
-        assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
+        # assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
         assert self.openmp_num_threads > 0, "Openmp threads number has to be strictly positive"
         assert self.dataset_length >= 0, "the number of instances cannot be negative"
 
@@ -151,6 +155,7 @@ class Config(metaclass=Singleton):
             "max_num_load_store_dim": self.max_num_load_store_dim,
             "num_tile_sizes": self.num_tile_sizes,
             "num_transformations": self.num_transformations,
+            "force_optimization": self.force_optimization,
             "vect_size_limit": self.vect_size_limit,
             "openmp_num_threads": self.openmp_num_threads,
             "use_bindings": self.use_bindings,

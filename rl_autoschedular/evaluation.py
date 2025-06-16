@@ -1,26 +1,35 @@
 import os
 import re
 import traceback
+from filelock import FileLock
 import numpy as np
 import json
+import multiprocessing
 
 from mlir.ir import Context, Module
 from mlir.execution_engine import ExecutionEngine, ctypes
 from mlir.runtime import get_ranked_memref_descriptor
 from mlir.passmanager import PassManager
-from typing import Union, Optional
-import multiprocessing
+
+from typing import Optional
+
 from rl_autoschedular import config as cfg
-from utils.log import print_alert, print_error
+from utils.log import print_alert, print_error,stable_hash,open_cache_db
 
 def get_cached_execution_time(transformed_code: str) -> Optional[int]:
     if not cfg.cache_file:
         return None
     
-    with open(cfg.cache_file,"r") as f:
-        exec_cache : dict[str,int] = json.load(f)
+    lock = FileLock(f"{cfg.cache_file}.lock")
+    with lock:
+        with open(cfg.cache_file,"r") as f:
+            try:
+                exec_cache: dict[str, int] = json.load(f)
+            except json.JSONDecodeError as e:
+                print_error(f"Json read failure: {e}")
+                exec_cache = {}
     
-    key = str(hash(transformed_code)) # JSON only accepts strings as keys
+    key = str(stable_hash(transformed_code)) # JSON only accepts strings as keys
     
     return exec_cache.get(key) # None if key is not set
 
@@ -28,16 +37,54 @@ def set_cached_execution_time(transformed_code: str, execution_time: int):
     if not cfg.cache_file:
         return
     
-    with open(cfg.cache_file,"r+") as f:
-        exec_cache: dict[str,int] = json.load(f)
+    lock = FileLock(f"{cfg.cache_file}.lock")
     
-        key = hash(transformed_code) # JSON automatically transforms keys to string type
-        exec_cache[key] = execution_time
+    with lock:
+        with open(cfg.cache_file,"r+") as f:
+            try:
+                exec_cache: dict[str, int] = json.load(f)
+            except json.JSONDecodeError as e:
+                print_error(f"Json read failure: {e}")
+                exec_cache = {}
+        
+            key = stable_hash(transformed_code) # JSON automatically transforms keys to string type
+            exec_cache[key] = execution_time
 
-        f.seek(0)
-        f.truncate()
+            f.seek(0)
+            f.truncate()
 
-        json.dump(exec_cache, f)
+            json.dump(exec_cache, f)
+
+
+def set_cached_execution_time_sqlite(transformed_code: str, execution_time: int):
+    if not cfg.cache_file:
+        return
+
+    code_hash = stable_hash(transformed_code)
+
+    with open_cache_db(cfg.cache_file) as conn:
+        conn.execute(
+            """INSERT INTO execution_cache (code_hash, execution_time) VALUES (?, ?)""", 
+            (code_hash, execution_time)
+        )
+
+def get_cached_execution_time_sqlite(transformed_code: str) -> Optional[int]:
+    if not cfg.cache_file:
+        return None
+
+    code_hash = stable_hash(transformed_code)
+
+    with open_cache_db(cfg.cache_file) as conn:
+        cursor = conn.execute(
+            """
+                SELECT execution_time
+                FROM execution_cache
+                WHERE code_hash = ?
+            """, (code_hash,)
+        )
+        
+        row = cursor.fetchone()
+        return row[0] if row else None
 
 
 # ================================== Evaluation Functions (Python Bindings) ==================================

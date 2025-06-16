@@ -1,10 +1,32 @@
 import random
 import string
 from hashlib import sha256
+import sqlite3
+from contextlib import contextmanager
 
 
 def stable_hash(s: str) -> str:
     return sha256(s.encode('utf-8')).hexdigest()
+
+def init_cache_db(path: str):
+    with sqlite3.connect(path) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS execution_cache (
+                code_hash TEXT PRIMARY KEY,
+                execution_time INTEGER
+            )
+        """)
+        conn.commit()
+
+# Context manager to handle database connections safely
+@contextmanager
+def open_cache_db(path: str):
+    conn = sqlite3.connect(path, timeout=5)
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def generate_random_string():

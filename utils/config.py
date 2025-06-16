@@ -1,4 +1,5 @@
 import os
+from utils.log import init_cache_db
 from utils.singleton import Singleton
 import json
 from typing import Literal
@@ -167,13 +168,21 @@ class Config(metaclass=Singleton):
         assert self.empty_penalty >= 0
 
         if self.cache_file:
-            if not os.path.exists(self.cache_file):
-                with open(self.cache_file, "w") as g:
-                    json.dump({}, g)
-            else:
-                with open(self.cache_file, "r+") as g:
-                    if g.read() == "":
+            if self.cache_file.endswith(".json"):
+                if not os.path.exists(self.cache_file):
+                    with open(self.cache_file, "w") as g:
                         json.dump({}, g)
+                else:
+                    with open(self.cache_file, "r+") as g:
+                        if g.read() == "":
+                            json.dump({}, g)
+
+            elif self.cache_file.endswith(".sqlite"): 
+                init_cache_db(self.cache_file)
+
+            else:
+                self.cache_file = ""
+            
 
         os.environ["OMP_NUM_THREADS"] = str(self.openmp_num_threads)
 

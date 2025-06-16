@@ -67,43 +67,43 @@ if __name__ == '__main__':
     STRIDES.extend(config['SHAPES']['STRIDES']) # Used by operations on images
     SIZES.extend(config['SHAPES']['SIZES']) # Used on other operations like matmul, add, etc...    
 
-    # operations_config = {
-    #     operation_name: (LINALG_OPERATION_GENERATORS[operation_name], amount) for operation_name, amount in config['OPERATIONS'].items() if amount > 0
-    # }
-
-    # print( sum( amount for _, (_, amount) in operations_config.items() ) )
-
     operations_config = {
-        # "randomSubGraph": (randomSubGraph, 1400),
-
-        # "Linear block (sigmoid)": (
-        #     lambda :randomblocks(operations=[
-        #         "matmul",
-        #         "add",
-        #         "sigmoid"
-        #     ]),100
-        # ),
-
-        # "Linear block (relu)": (
-        #     lambda :randomblocks(operations=[
-        #         "matmul",
-        #         "add",
-        #         "relu"
-        #     ]),100
-        # ),
-
-        # "Conv2d block": (
-        #     lambda :randomblocks(operations=[
-        #         "conv_2d_nchw_fchw",
-        #         "relu"
-        #     ]),100
-        # ),
-
-        # "Resnet": (generate_resnet_block, 100),
-
-        # "Residual block": (generate_residual_block_mlir, 100)
-
+        operation_name: (LINALG_OPERATION_GENERATORS[operation_name], amount) for operation_name, amount in config['OPERATIONS'].items() if amount > 0
     }
+
+    print( sum( amount for _, (_, amount) in operations_config.items() ) )
+
+    # operations_config = {
+    #     # "randomSubGraph": (randomSubGraph, 1400),
+
+    #     # "Linear block (sigmoid)": (
+    #     #     lambda :randomblocks(operations=[
+    #     #         "matmul",
+    #     #         "add",
+    #     #         "sigmoid"
+    #     #     ]),100
+    #     # ),
+
+    #     # "Linear block (relu)": (
+    #     #     lambda :randomblocks(operations=[
+    #     #         "matmul",
+    #     #         "add",
+    #     #         "relu"
+    #     #     ]),100
+    #     # ),
+
+    #     # "Conv2d block": (
+    #     #     lambda :randomblocks(operations=[
+    #     #         "conv_2d_nchw_fchw",
+    #     #         "relu"
+    #     #     ]),100
+    #     # ),
+
+    #     # "Resnet": (generate_resnet_block, 100),
+
+    #     # "Residual block": (generate_residual_block_mlir, 100)
+
+    # }
 
 
     all_operations = {}

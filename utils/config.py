@@ -125,7 +125,7 @@ class Config(metaclass=Singleton):
         assert self.train_eval_split >= 0 and self.train_eval_split <= 1, "train_eval_split should be between 0 and 1."
         assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
         assert self.optimization_mode in ["last", "all"], "Invalid optimization mode. Should be 'last' or 'all'."
-        assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
+        # assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
         assert self.openmp_num_threads > 0, "Openmp threads number has to be strictly positive"
         assert self.dataset_length >= 0, "the number of instances cannot be negative"
 

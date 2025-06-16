@@ -24,6 +24,7 @@ from rl_autoschedular.transforms import (
     transform_dialect_vectorise_with_vectorizer
 )
 from rl_autoschedular.evaluation import (
+    evaluate_code_with_bindings_and_timeout_ray,
     evaluate_code_with_bindings_and_timeout,
     evaluate_code_with_cmd_and_timeout,
     get_cached_execution_time,
@@ -358,35 +359,35 @@ class Env:
                 # to prepare it for the optimization in the next iterations
 
                 prints = get_ops_by_tags(transformed_code, [state.operation_tag], self.tmp_file)
-                assert len(prints.values()) != 0
-                # if len(prints.values()) != 0:
-                raw_operation = list(prints.values())[0]
+                # assert len(prints.values()) != 0
+                if len(prints.values()) != 0:
+                    raw_operation = list(prints.values())[0]
 
-                operation_features = extract_op_features_from_affine_code(raw_operation, self.tmp_file)
+                    operation_features = extract_op_features_from_affine_code(raw_operation, self.tmp_file)
 
-                state = OperationState(
-                    bench_name=state.bench_name,
-                    operation_tag=state.operation_tag,
-                    operation_index=state.operation_index,
-                    operation_type='conv_2d+img2col',  # The operation type changes
-                    operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
-                    current_producer = 0,
-                    producer_tag = state.producer_tag,
-                    producer_features = state.producer_features,
-                    fused_ops = state.fused_ops,
-                    transformed_code=state.transformed_code,
-                    actions=state.actions,
-                    actions_mask=state.actions_mask,
-                    step_count=state.step_count + 1,
-                    exec_time=state.exec_time,
-                    root_exec_time=state.root_exec_time,
-                    empty_schedule = state.empty_schedule,
-                    transformation_history=state.transformation_history + [(transformation, parameters)],
-                    cummulative_reward=state.cummulative_reward,
-                    tmp_file=self.tmp_file
-                )
-                # else:
-                #     transformed_code = ""
+                    state = OperationState(
+                        bench_name=state.bench_name,
+                        operation_tag=state.operation_tag,
+                        operation_index=state.operation_index,
+                        operation_type='conv_2d+img2col',  # The operation type changes
+                        operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
+                        current_producer = 0,
+                        producer_tag = state.producer_tag,
+                        producer_features = state.producer_features,
+                        fused_ops = state.fused_ops,
+                        transformed_code=state.transformed_code,
+                        actions=state.actions,
+                        actions_mask=state.actions_mask,
+                        step_count=state.step_count + 1,
+                        exec_time=state.exec_time,
+                        root_exec_time=state.root_exec_time,
+                        empty_schedule = state.empty_schedule,
+                        transformation_history=state.transformation_history + [(transformation, parameters)],
+                        cummulative_reward=state.cummulative_reward,
+                        tmp_file=self.tmp_file
+                    )
+                else:
+                    transformed_code = ""
 
             elif transformed_code and (transformation == "fusion" or transformation == 'parallelization'):
 
@@ -685,7 +686,7 @@ class Env:
 
         # Execute and evaluate the code
         if cfg.use_bindings:
-            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout(transformed_code, timeout=200)
+            new_exec_time, bench_passed = evaluate_code_with_bindings_and_timeout_ray(transformed_code, timeout=200)
         else:
             new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=200)
         # Print infos and update reward

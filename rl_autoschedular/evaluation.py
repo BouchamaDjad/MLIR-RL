@@ -4,6 +4,8 @@ import traceback
 import numpy as np
 import json
 
+import ray
+
 from mlir.ir import Context, Module
 from mlir.execution_engine import ExecutionEngine, ctypes
 from mlir.runtime import get_ranked_memref_descriptor
@@ -12,6 +14,8 @@ from typing import Union, Optional
 import multiprocessing
 from rl_autoschedular import config as cfg
 from utils.log import print_error
+
+from ray import remote, wait, get, cancel
 
 def get_cached_execution_time(transformed_code: str) -> Optional[int]:
     if not cfg.cache_file:
@@ -88,38 +92,78 @@ def evaluate_code_with_bindings(code: str) -> tuple[Optional[int], bool]:
     )"""
 
     os.environ["OMP_NUM_THREADS"] = str(cfg.openmp_num_threads)
-
-    with Context():
-        module = Module.parse(code)
-        pm = PassManager.parse(pass_pipeline)
-        pm.run(module.operation)
     
-    execution_engine = ExecutionEngine(
-        module,
-        shared_libs=os.getenv("MLIR_SHARED_LIBS", "").split(","),
-    )
+    lock = ray.get_actor("lock", namespace="Train")
 
-    inputs = __create_inputs(code)
-
-    args = []
-    for input_arg in inputs:
-        args.append(ctypes.pointer(ctypes.pointer(
-            get_ranked_memref_descriptor(input_arg)
-        )))
-
-    delta_arg = (ctypes.c_int64 * 1)(0)
-    args.append(delta_arg)
+    ray.get(lock.acquire.remote())
 
     try:
+
+        with Context():
+            module = Module.parse(code)
+            pm = PassManager.parse(pass_pipeline)
+            pm.run(module.operation)
+        
+        execution_engine = ExecutionEngine(
+            module,
+            shared_libs=os.getenv("MLIR_SHARED_LIBS", "").split(","),
+        )
+
+        inputs = __create_inputs(code)
+
+        args = []
+        for input_arg in inputs:
+            args.append(ctypes.pointer(ctypes.pointer(
+                get_ranked_memref_descriptor(input_arg)
+            )))
+
+        delta_arg = (ctypes.c_int64 * 1)(0)
+        args.append(delta_arg)
+
         [execution_engine.invoke("main", *args) for _ in range(1)]
+    
     except Exception as e:
+        
         traceback.print_exc()    
         return None, False
+    
+    finally:
+        lock.release.remote()
 
     if delta_arg[0] is None:
         print("",end="")
 
+
     return delta_arg[0], True
+
+
+def evaluate_code_with_bindings_and_timeout_ray(code: str, timeout: Optional[float] = None) -> tuple[Optional[int], bool]:
+    """Evaluates the given MLIR code using Python bindings with a timeout.
+
+    Args:
+        code (str): The MLIR code to run.
+        function_name (str): The name of the function to run.
+        timeout (Optional[float]): The timeout in seconds.
+
+    Returns:
+        Optional[float]: the execution time in nanoseconds.
+        bool: the assertion result.
+    """
+
+    evaluate = remote(evaluate_code_with_bindings)
+    future = evaluate.remote(code)
+    ready = get(future)
+
+    # if ready:
+    # try:
+    return ready
+    # except Exception as e:
+    #     print(e)
+    # finally:
+    #     return None,False
+    # else:
+    #     cancel(future, force=True)
+    #     return None, False
 
 def evaluate_code_with_bindings_wrapper(code: str, exec_times, assertions):
     """Wrapper function for evaluate_code_with_bindings to be used in multiprocessing.
@@ -132,11 +176,10 @@ def evaluate_code_with_bindings_wrapper(code: str, exec_times, assertions):
     """
     try:
         exec_time, assertion = evaluate_code_with_bindings(code)
+        exec_times.append(exec_time)
+        assertions.append(assertion)
     except:
-        traceback.print_exc()        
-
-    exec_times.append(exec_time)
-    assertions.append(assertion)
+        traceback.print_exc()
 
 def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float]) -> tuple[Optional[int], bool]:
     """Evaluates the given MLIR code using Python bindings with a timeout.

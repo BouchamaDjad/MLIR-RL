@@ -1,15 +1,18 @@
+import asyncio
 import torch
 import neptune
 import numpy as np
 from typing import Optional
 from rl_autoschedular.env import ParallelEnv
 from rl_autoschedular.model import HiearchyModel as Model
-from rl_autoschedular.state import LoopNode, OperationState
+from rl_autoschedular.state import BenchmarkFeatures, LoopNode, OperationState
 from rl_autoschedular import config as cfg
 from dataclasses import dataclass
 
-from utils.log import print_error
+from utils.log import print_error,print_success
 import traceback
+
+from ray import remote,get,ObjectRef,get_actor,wait
 
 
 @dataclass
@@ -423,6 +426,175 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
             # obs = torch.cat(next_obs).to(device)
 
         print('\n\n\n')
+
+    if neptune_logs is not None:
+        neptune_logs['eval/average_speedup'].append(sum(speedup_values) / len(speedup_values))
+
+def DistributeEnv(main_env: ParallelEnv, num_env: int):
+    envs = [
+        main_env.copy() for _ in range(num_env)
+    ]
+
+    assert len(set([env.envs[0].tmp_file for env in envs])) != num_env 
+
+    return envs
+
+@remote
+class ModelActor:
+    def __init__(self, model):
+        self.model = model
+
+    def sample(self, obs):
+        return self.model.sample(obs)
+
+import time
+@remote
+class Lock:
+    def __init__(self):
+        self.locked = False
+
+    # async def acquire(self):
+    #     while self.locked:
+    #         await asyncio.sleep(0.01)
+    #     self.locked = True
+
+    def acquire(self):
+        while self.locked:
+            time.sleep(0.01)  # Block the thread for 10ms
+        self.locked = True
+
+    def release(self):
+        self.locked = False
+
+# @remote
+# class Lock:
+#     def __init__(self):
+#         self._locked = False
+#         self._wait_queue = []
+
+#     async def acquire(self):
+#         if not self._locked:
+#             self._locked = True
+#             return  # Lock acquired immediately
+
+#         # Lock is held — wait
+#         fut = asyncio.get_event_loop().create_future()
+#         self._wait_queue.append(fut)
+#         await fut
+
+#     def release(self):
+#         if self._wait_queue:
+#             # Wake the next future safely
+#             fut = self._wait_queue.pop(0)
+#             if not fut.done():
+#                 fut.set_result(None)
+#         else:
+#             self._locked = False
+
+@remote(scheduling_strategy="SPREAD",num_cpus=1)
+def __evaluate(i: int, benchmark_data: BenchmarkFeatures, env: ParallelEnv, model: "ObjectRef[ModelActor]", neptune_logs: Optional[neptune.Run] = None) -> float:
+    
+    if cfg.data_format == 'json' and "bench" not in benchmark_data.bench_name:
+        op_tag = benchmark_data.operation_tags[-1]
+        print(f'Operation ({i}):', benchmark_data.operations[op_tag].raw_operation)
+    else:
+        print(f'Benchmark ({i}):', benchmark_data.bench_name)
+
+    # Reset the environement with the specific operation
+    state, obs = env.reset(i)
+    # obs = torch.cat(obs).to(device)
+
+    while True:
+        x = obs[0]
+            
+        with torch.no_grad():
+            # Select the action using the model
+            action, _, _, _ = get(model.sample.remote(x))
+
+        # Apply the action and get the next state
+        next_obs, _, terminated, next_state, final_state = env.step(state, action)
+
+        done = terminated[0]
+        final_state = final_state[0]
+        if done and final_state is not None:
+            speedup_metric = final_state.root_exec_time / final_state.exec_time
+            print('Operation:', final_state.operation_features.raw_operation)
+            print('Base execution time:', final_state.root_exec_time, 's')
+            print('New execution time:', final_state.exec_time, 's')
+            print('Speedup:', speedup_metric)
+
+            if neptune_logs is not None:
+                neptune_logs[f'eval/{benchmark_data.bench_name}_speedup'].append(speedup_metric)
+                neptune_logs['eval/final_speedup'].append(speedup_metric)
+                # speedup_values.append(speedup_metric)
+
+            break
+
+        state = next_state
+        obs = next_obs
+        # obs = torch.cat(next_obs).to(device)
+
+    print('\n\n\n')
+    return speedup_metric
+
+def evaluate_benchmark_ray(model: Model, env: ParallelEnv, device: torch.device = torch.device('cpu'), neptune_logs: Optional[neptune.Run] = None):
+    """Evaluate the benchmark using the model.
+
+    Args:
+        model (Model): The model to use.
+        env (ParallelEnv): The environment to use.
+        device (torch.device): The device to use. Defaults to torch.device('cpu').
+        neptune_logs (Optional[neptune.Run]): The neptune run to log to if any. Defaults to None.
+    """
+    print_success("STARTING")
+
+    benchmarks_data = env.envs[0].benchmarks_data
+    
+    envs = DistributeEnv(env, len(benchmarks_data))
+
+    model = ModelActor.remote(model)
+
+    lock = Lock.options(name="lock").remote()
+
+    # # NOTE: Only using one environment
+    # future_speedup_values: list[ObjectRef[float]] = [
+    #     __evaluate.remote(i, benchmark_data, env, model, neptune_logs) # .options(enable_task_events=False).
+    #     for i,(env, (_, benchmark_data)) in enumerate(zip(envs, benchmarks_data))
+    # ]        
+
+    # try:
+    #     mid_point = int(len(future_speedup_values)/2)
+    #     speedup_values_1 = get(future_speedup_values[:mid_point])
+    #     speedup_values = get(future_speedup_values[mid_point:]) + speedup_values_1
+
+    #     print_success(len(speedup_values), len(list(zip(envs, env.envs[0].benchmarks_data))))
+    #     print_success(sum(speedup_values) / len(speedup_values))
+    #     print_success("FINISHED")
+        
+    MAX_NUM_PENDING_TASKS = 20
+
+    future_speedup_values: list[ObjectRef[float]] = []
+    speedup_values = []
+    try:
+        for i,(env, (_, benchmark_data)) in enumerate(zip(envs, benchmarks_data)):
+            if len(future_speedup_values) > MAX_NUM_PENDING_TASKS:
+                # update future_speedup_values to only
+                # track the remaining tasks.
+                ready_refs, future_speedup_values = wait(future_speedup_values, num_returns=1)
+                speedup_values.extend(get(ready_refs))
+
+            future_speedup_values.append(__evaluate.remote(i, benchmark_data, env, model, neptune_logs))
+
+
+        speedup_values.extend(get(future_speedup_values))
+        print_success(len(speedup_values), len(list(zip(envs, env.envs[0].benchmarks_data))))
+        print_success(sum(speedup_values) / len(speedup_values))
+        print_success("FINISHED")
+    
+    except Exception as e:
+        print_error(e)
+
+
 
     if neptune_logs is not None:
         neptune_logs['eval/average_speedup'].append(sum(speedup_values) / len(speedup_values))

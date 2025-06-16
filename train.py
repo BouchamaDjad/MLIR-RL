@@ -1,6 +1,7 @@
 # Load environment variables
 import random
 from dotenv import load_dotenv
+import ray
 load_dotenv(override=True)
 
 # Import modules
@@ -19,7 +20,7 @@ from utils.neptune_utils import init_neptune
 from rl_autoschedular.ppo import (
     collect_trajectory,
     ppo_update,
-    evaluate_benchmark
+    evaluate_benchmark_ray
 )
 
 # Set target device
@@ -115,37 +116,40 @@ print_info(f"Run id: {run_id}")
 
 # Start training
 print_info('Start training ... ')
+ray.shutdown()
+ray.init(namespace="Train")
 tqdm_range = tqdm(range(cfg.nb_iterations), desc='Main loop')
 for step in tqdm_range:
 
-    trajectory = collect_trajectory(
-        cfg.len_trajectory,
-        model,
-        env,
-        device=device,
-        neptune_logs=neptune_logs
-    )
+    # trajectory = collect_trajectory(
+    #     cfg.len_trajectory,
+    #     model,
+    #     env,
+    #     device=device,
+    #     neptune_logs=neptune_logs
+    # )
 
-    loss = ppo_update(
-        trajectory,
-        model,
-        optimizer,
-        ppo_epochs=cfg.ppo_epochs,
-        ppo_batch_size=cfg.ppo_batch_size,
-        device=device,
-        entropy_coef=cfg.entropy_coef,
-        neptune_logs=neptune_logs
-    )
+    # loss = ppo_update(
+    #     trajectory,
+    #     model,
+    #     optimizer,
+    #     ppo_epochs=cfg.ppo_epochs,
+    #     ppo_batch_size=cfg.ppo_batch_size,
+    #     device=device,
+    #     entropy_coef=cfg.entropy_coef,
+    #     neptune_logs=neptune_logs
+    # )
 
-    torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
+    # torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
 
     if step % 5 == 0:
-        evaluate_benchmark(
+        evaluate_benchmark_ray(
             model=model,
             env=eval_env,
             device=device,
             neptune_logs=neptune_logs
         )
+        ray.shutdown()
 
         if cfg.logging:
             neptune_logs["params"].upload_files([f'models/ppo_model_{run_id}.pt'])

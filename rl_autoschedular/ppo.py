@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from utils.log import print_error
 import traceback
+from collections import defaultdict
 
 
 @dataclass
@@ -248,7 +249,10 @@ def compute_gae(done: torch.Tensor, rewards: torch.Tensor, values: torch.Tensor,
     return advantages, returns
 
 
-def ppo_update(trajectory: Trajectory, model: Model, optimizer: torch.optim.Optimizer, ppo_epochs: int, ppo_batch_size: int, device: torch.device = torch.device('cpu'), entropy_coef: float = 0.01, neptune_logs: Optional[neptune.Run] = None):
+def ppo_update(
+    trajectory: Trajectory, model: Model, optimizer: torch.optim.Optimizer, scheduler: Optional[torch.optim.lr_scheduler.ReduceLROnPlateau], 
+    ppo_epochs: int, ppo_batch_size: int, device: torch.device = torch.device('cpu'), entropy_coef: float = 0.01, neptune_logs: Optional[neptune.Run] = None
+):
     """Update the model using PPO.
 
     Args:
@@ -314,9 +318,8 @@ def ppo_update(trajectory: Trajectory, model: Model, optimizer: torch.optim.Opti
             
             new_action_log_p, new_values, entropy = [], [], []
             for single_x,single_action_index in zip(x,action_index):
-                x = single_x
                 
-                _, n_action_log_p, value, ent = model.sample(x, actions=[single_action_index])
+                _, n_action_log_p, value, ent = model.sample(single_x, actions=[single_action_index])
                 
                 new_action_log_p.append(n_action_log_p)
                 new_values.append(value)
@@ -341,7 +344,7 @@ def ppo_update(trajectory: Trajectory, model: Model, optimizer: torch.optim.Opti
             returns, new_values = returns.reshape(-1), new_values.reshape(-1)
 
             value_loss = ((returns - new_values)**2).mean()
-            value_loss = ((returns - new_values).abs()).mean()
+            # value_loss = ((returns - new_values).abs()).mean()
 
             loss = policy_loss - entropy_coef * entropy + 0.5 * value_loss
 
@@ -358,11 +361,17 @@ def ppo_update(trajectory: Trajectory, model: Model, optimizer: torch.optim.Opti
 
             # Collecting metircs:
             if neptune_logs is not None:
-                neptune_logs['train/policy_loss'].append(policy_loss.item())
-                neptune_logs['train/value_loss'].append(value_loss.item())
-                neptune_logs['train/entropy'].append(entropy.item())
-                neptune_logs['train/clip_factor'].append(clip_factor.item())
+                neptune_logs['train/policy_loss'].append(policy_loss.detach().item())
+                neptune_logs['train/value_loss'].append(value_loss.detach().item())
+                neptune_logs['train/entropy'].append(entropy.detach().item())
+                neptune_logs['train/clip_factor'].append(clip_factor.detach().item())
 
+        if cfg.use_lr_scheduling: 
+            scheduler.step(stored_reward.mean().item())
+            
+            if neptune_logs is not None:
+                for i, param_group in enumerate(optimizer.param_groups):
+                    neptune_logs[f'train/lr_group_{i}'].append(param_group['lr'])
         # print()
         # print('***'*50)
         # print()
@@ -381,6 +390,8 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
     """
     # NOTE: Only using one environment
     speedup_values: list[float] = []
+    log: dict[str, list[float]] = defaultdict(list)
+
     for i, (bench_name, benchmark_data) in enumerate(env.envs[0].benchmarks_data):
         if cfg.data_format == 'json' and "bench" not in benchmark_data.bench_name:
             op_tag = benchmark_data.operation_tags[-1]
@@ -397,10 +408,10 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
 
             with torch.no_grad():
                 # Select the action using the model
-                action, _, _, _ = model.sample(x)
+                action, _, _, _ = model.sample(x,greedy=True)
 
             # Apply the action and get the next state
-            next_obs, reward, terminated, next_state, final_state = env.step(state, action)
+            next_obs, _, terminated, next_state, final_state = env.step(state, action)
 
             done = terminated[0]
             final_state = final_state[0]
@@ -412,15 +423,21 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
                 print('Speedup:', speedup_metric)
 
                 if neptune_logs is not None:
-                    neptune_logs[f'eval/{env.envs[0].bench_index}_speedup'].append(speedup_metric)
-                    neptune_logs['eval/final_speedup'].append(speedup_metric)
+                    log[f'eval/{env.envs[0].bench_index}_speedup'].append(speedup_metric)
+                    log['eval/final_speedup'].append(speedup_metric)
                     speedup_values.append(speedup_metric)
-
                 break
 
             state = next_state
             obs = next_obs
             # obs = torch.cat(next_obs).to(device)
+        
+        if neptune_logs is not None:
+            for k, v in log.items():
+                for value in v:
+                    neptune_logs[k].append(v)
+
+            log = defaultdict(list)
 
         print('\n\n\n')
 

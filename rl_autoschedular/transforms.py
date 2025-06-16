@@ -432,23 +432,23 @@ def transform_dialect_vectorize_with_vectorizer(code: str, operation_tag: str, t
     
     
     transform_dialect_code = """
-module attributes {transform.with_named_sequence} {
-    transform.named_sequence @__transform_main(%variant_op: !transform.any_op {transform.readonly}) {
-        %f = transform.structured.match ops{[\"func.func\"]} in %variant_op : (!transform.any_op) -> !transform.any_op
-        transform.apply_patterns to %f {
-            transform.apply_patterns.vector.lower_contraction lowering_strategy = "outerproduct"
-            transform.apply_patterns.vector.transfer_permutation_patterns
-            transform.apply_patterns.vector.lower_multi_reduction lowering_strategy = "innerparallel"
-            transform.apply_patterns.vector.split_transfer_full_partial split_transfer_strategy = "vector-transfer"
-            transform.apply_patterns.vector.transfer_to_scf max_transfer_rank = 1 full_unroll = true
-            transform.apply_patterns.vector.lower_transfer max_transfer_rank = 1
-            transform.apply_patterns.vector.lower_shape_cast
-            transform.apply_patterns.vector.lower_transpose lowering_strategy = "shuffle_1d"
-            transform.apply_patterns.canonicalization
-        } : !transform.any_op
-        transform.yield
-    }
-}""".strip()
+    module attributes {transform.with_named_sequence} {
+        transform.named_sequence @__transform_main(%variant_op: !transform.any_op {transform.readonly}) {
+            %f = transform.structured.match ops{[\"func.func\"]} in %variant_op : (!transform.any_op) -> !transform.any_op
+            transform.apply_patterns to %f {
+                transform.apply_patterns.vector.lower_contraction lowering_strategy = "outerproduct"
+                transform.apply_patterns.vector.transfer_permutation_patterns
+                transform.apply_patterns.vector.lower_multi_reduction lowering_strategy = "innerparallel"
+                transform.apply_patterns.vector.split_transfer_full_partial split_transfer_strategy = "vector-transfer"
+                transform.apply_patterns.vector.transfer_to_scf max_transfer_rank = 1 full_unroll = true
+                transform.apply_patterns.vector.lower_transfer max_transfer_rank = 1
+                transform.apply_patterns.vector.lower_shape_cast
+                transform.apply_patterns.vector.lower_transpose lowering_strategy = "shuffle_1d"
+                transform.apply_patterns.canonicalization
+            } : !transform.any_op
+            transform.yield
+        }
+    }""".strip()
 
     full_code = vect_code + '\n' + transform_dialect_code + '\n'
 
@@ -666,7 +666,7 @@ def apply_transformation_wrapper(state: OperationState, code: str, transformatio
     return_list.append(res)
 
 
-def apply_transformation_with_timeout(state: OperationState, code: str, transformation: str, parameters: list, timeout: Optional[float] = 20) -> str:
+def apply_transformation_with_timeout(state: OperationState, code: str, transformation: str, parameters: list, timeout: Optional[float] = None) -> str:
     """Apply the specified transformation to the given code with a timeout.
 
     Args:
@@ -679,22 +679,22 @@ def apply_transformation_with_timeout(state: OperationState, code: str, transfor
     Returns:
         str: The code after applying the transformation.
     """
-    manager = multiprocessing.Manager()
-    return_list = manager.list()
-    process = multiprocessing.Process(target=apply_transformation_wrapper, args=(state, code, transformation, parameters, return_list))
-    process.start()
-    process.join(timeout)
+    # manager = multiprocessing.Manager()
+    # return_list = manager.list()
+    # process = multiprocessing.Process(target=apply_transformation_wrapper, args=(state, code, transformation, parameters, return_list))
+    # process.start()
+    # process.join(timeout)
 
-    if process.is_alive():
-        # The function is still running, terminate the process
-        process.terminate()
-        process.join()
+    # if process.is_alive():
+    #     # The function is still running, terminate the process
+    #     process.terminate()
+    #     process.join()
 
-        return None
-    else:
-        # The function completed within the timeout
-        return return_list[0]
-
+    #     return None
+    # else:
+    #     # The function completed within the timeout
+    #     return return_list[0]
+    return apply_transformation(state, code, transformation, parameters)
 
 # ========================================= Other functions =========================================
 

@@ -34,6 +34,18 @@ class Config(metaclass=Singleton):
     """the number of instance that will be used in the training and evaluation set"""
     cache_file: str
     """The path to the cache file that will be used to store execution times (to optimize the run's runtime)"""
+
+    empty_penalty : float
+    """penalize the model if it decides to not do any optimization"""
+    layer_norm_eps: float
+    """epsilon value for the lstm layer norm"""
+    execution_error_penalty : float
+    trans_failed_penalty : float
+    bias_values : list[float]
+    use_lr_scheduling: bool
+    residual: bool
+    tree_type: Literal["ast", "raw_op"]
+    
     benchmarks_folder_path: str
     """Path to the benchmarks folder. Can be empty if data format is set to "json"."""
     len_trajectory: int
@@ -91,6 +103,14 @@ class Config(metaclass=Singleton):
         self.tags = []
         self.logging = True
         self.loaded = False
+        self.empty_penalty = 0
+        self.layer_norm_eps = 0.00001
+        self.execution_error_penalty = 20
+        self.trans_failed_penalty = 5
+        self.bias_values = [0.0, 0.3, -0.2, -0.3, 0.0, 0.0, 0.4]
+        self.use_lr_scheduling = False
+        self.residual = False
+        self.tree_type = "ast"
 
     def load_from_json(self):
         """Load the configuration from the JSON file."""
@@ -103,7 +123,7 @@ class Config(metaclass=Singleton):
         self.max_num_load_store_dim = config["max_num_load_store_dim"]
         self.num_tile_sizes = config["num_tile_sizes"]
         self.num_transformations = config["num_transformations"]
-        self.force_optimization = config["force_optimization"]
+        self.force_optimization = config["force_optimization"] 
         self.vect_size_limit = config["vect_size_limit"]
         self.openmp_num_threads = config["openmp_num_threads"]
         self.use_bindings = config["use_bindings"]
@@ -125,6 +145,15 @@ class Config(metaclass=Singleton):
         self.tags = config["tags"]
         self.logging = config["logging"]
         
+        self.empty_penalty = config["empty_penalty"]
+        self.layer_norm_eps = config["layer_norm_eps"]
+        self.execution_error_penalty = config["execution_error_penalty"]
+        self.trans_failed_penalty = config["trans_failed_penalty"]
+        self.bias_values = config["bias_values"]
+        self.use_lr_scheduling = config["use_lr_scheduling"]
+        self.residual = config["residual"]
+        self.tree_type = config["tree_type"]
+        
         # Check the configuration values
         assert self.train_eval_split >= 0 and self.train_eval_split <= 1, "train_eval_split should be between 0 and 1."
         assert self.data_format in ["json", "mlir"], "Invalid data format. Should be 'json' or 'mlir'."
@@ -132,6 +161,10 @@ class Config(metaclass=Singleton):
         # assert len(self.benchmarks_folder_path) > 0 or self.data_format == "json", "Benchmark folder path should be set if data_format is 'mlir'."
         assert self.openmp_num_threads > 0, "Openmp threads number has to be strictly positive"
         assert self.dataset_length >= 0, "the number of instances cannot be negative"
+        assert len(self.bias_values) == self.num_transformations or self.bias_values == [], "Length of bias_values must match num_transformations"
+        assert all(isinstance(v, float) for v in self.bias_values), "All bias_values must be float"
+        assert self.tree_type in ["ast", "raw_op"]
+        assert self.empty_penalty >= 0
 
         if self.cache_file:
             if not os.path.exists(self.cache_file):
@@ -141,6 +174,8 @@ class Config(metaclass=Singleton):
                 with open(self.cache_file, "r+") as g:
                     if g.read() == "":
                         json.dump({}, g)
+
+        os.environ["OMP_NUM_THREADS"] = str(self.openmp_num_threads)
 
         
         # assert self.data_format != "json" or not self.use_bindings, "The specific case of using python bindings with JSON data format is not implemented yet."
@@ -180,4 +215,4 @@ class Config(metaclass=Singleton):
 
     def __str__(self):
         """Convert the configuration to a string."""
-        return str(self.to_dict())
+        return str(self.__dict__)

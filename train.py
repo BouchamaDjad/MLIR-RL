@@ -26,6 +26,9 @@ from rl_autoschedular.ppo import (
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu")
 
+# import better_exceptions
+# better_exceptions.hook()
+
 print_info('Finish imports')
 
 def reduce_dataset_size():
@@ -106,6 +109,13 @@ optimizer = torch.optim.Adam(
     lr=cfg.lr
 )
 
+if cfg.use_lr_scheduling:
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=0.5, patience=10
+    )
+else:
+    scheduler = None
+
 # Set neptune logs if enabled
 neptune_logs = init_neptune(['type_op','action-history'] + cfg.tags) if cfg.logging else None
 
@@ -130,6 +140,7 @@ for step in tqdm_range:
         trajectory,
         model,
         optimizer,
+        scheduler,
         ppo_epochs=cfg.ppo_epochs,
         ppo_batch_size=cfg.ppo_batch_size,
         device=device,

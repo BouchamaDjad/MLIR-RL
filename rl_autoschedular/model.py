@@ -209,6 +209,8 @@ class HiearchyModel(nn.Module):
         
         self.input_dim = 1 + L + L * D * SD + L * D + 5 + L * 3 * cfg.truncate + 6 # TODO: rechange it once the observation vector is finalized
         
+        AHL = cfg.max_num_loops * 4 * cfg.truncate # Action history len
+
         self.comp_embed_layer_sizes=[600, 350, 512, 512] # 411 = 1 + L + L * D * SD + L * D + 5 + 6
         self.drops=[0.225, 0.225, 0.225, 0.225]        
         self.num_loops = L
@@ -227,13 +229,21 @@ class HiearchyModel(nn.Module):
         
         self.action_mask_size = self.num_transformations + self.num_loops + self.num_loops + 3 * self.num_loops - 6
         
-        self.no_comps_tensor = nn.Parameter(torch.randn(1, embedding_size) * 0.01)
-        self.no_nodes_tensor = nn.Parameter(torch.randn(1, embedding_size) * 0.01)
+        self.no_comps_tensor = nn.Parameter(
+            initialization_function_xavier(torch.randn(1, embedding_size))
+        )
+        self.no_nodes_tensor = nn.Parameter(
+            initialization_function_xavier(torch.randn(1, embedding_size))
+        )
         
         
         for i in range(len(concat_layer_sizes) - 1):
+            linear_concat = nn.Linear(concat_layer_sizes[i], concat_layer_sizes[i + 1], bias=True)
+            initialization_function_xavier(linear_concat.weight)
+
             self.concat_layers.append(
-                nn.Linear(concat_layer_sizes[i], concat_layer_sizes[i + 1], bias=True)
+                linear_concat if not cfg.residual else
+                nn.Sequential(linear_concat, ResidualBlock(concat_layer_sizes[i+1]))
             )
             self.concat_dropouts.append(nn.Dropout(self.drops[i]))
             
@@ -249,10 +259,11 @@ class HiearchyModel(nn.Module):
         )
         
         self.roots_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], self.input_dim - 140, batch_first=True # 140 because of the action history
+            self.comp_embed_layer_sizes[-1], self.input_dim - AHL, batch_first=True
         )
         
-        
+        if cfg.layer_norm_eps:
+            self.layer_norm = nn.LayerNorm(self.input_dim - AHL, cfg.layer_norm_eps)
 
         self.backbone = nn.Sequential(
             nn.Linear(self.input_dim, 512),
@@ -260,6 +271,12 @@ class HiearchyModel(nn.Module):
             nn.Linear(512, 512),
             nn.ReLU(),
             nn.Linear(512, 512),
+            nn.ReLU(),
+        ) if not cfg.residual else nn.Sequential(
+            nn.Linear(self.input_dim, 512),
+            nn.ReLU(),
+            ResidualBlock(512, self.drops[-1]),
+            ResidualBlock(512, self.drops[-1]),
             nn.ReLU(),
         )
 
@@ -271,6 +288,12 @@ class HiearchyModel(nn.Module):
             nn.Linear(512, 512),
             nn.ReLU(),
             nn.Linear(512, 1),
+        ) if not cfg.residual else nn.Sequential(
+            nn.Linear(self.input_dim, 512),
+            nn.ReLU(),
+            ResidualBlock(512, self.drops[-1]),
+            ResidualBlock(512,self.drops[-1]),
+            nn.Linear(512, 1),
         )
 
         self.transformation_selection = nn.Linear(512, self.num_transformations)  # +1 for the stop operation
@@ -279,11 +302,9 @@ class HiearchyModel(nn.Module):
         self.parall_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no parallelizattion
         self.fusion_fc = nn.Linear(512, self.num_loops * (self.num_tiles + 1))  # +1 for the no fusion
 
-        no_bias = [0.0] * cfg.num_transformations
+        inital_bias = cfg.bias_values if cfg.bias_values else [0.0] * cfg.num_transformations
 
-        bias_values = [0.0, 0.3, -0.2, -0.3, 0.0, 0.0, 0.4]
-
-        self.transform_bias = nn.Parameter(torch.tensor(no_bias, dtype=torch.float32))
+        self.transform_bias = nn.Parameter(torch.tensor(inital_bias, dtype=torch.float32))
 
     
     def get_hidden_state(self, node):
@@ -331,7 +352,7 @@ class HiearchyModel(nn.Module):
 
         return x
 
-    def sample(self, obs: ObservationFeatures, actions: Optional[list[tuple[str, list[int]]]] = None):
+    def sample(self, obs: ObservationFeatures, greedy: Optional[bool] = False, actions: Optional[list[tuple[str, list[int]]]] = None):
         """Sample an action from the model.
 
         Args:
@@ -358,6 +379,8 @@ class HiearchyModel(nn.Module):
         # print('roots_h_n shape:',roots_h_n.shape)
         
         x = roots_h_n[0]
+
+        x = self.layer_norm(x) if cfg.layer_norm_eps else x
         
         action_history = torch.tensor(action_history, dtype=torch.float32).unsqueeze(0)
         
@@ -425,11 +448,18 @@ class HiearchyModel(nn.Module):
         fusion_dist = Categorical(logits=fusion_logits)
 
         if actions is None:
-            transformation_index = transformation_dist.sample()
-            interchange_index = interchange_dist.sample()
-            tiling_index = tiling_dist.sample()
-            parall_index = parall_dist.sample()
-            fusion_index = fusion_dist.sample()
+            if not greedy:
+                transformation_index = transformation_dist.sample()
+                interchange_index = interchange_dist.sample()
+                tiling_index = tiling_dist.sample()
+                parall_index = parall_dist.sample()
+                fusion_index = fusion_dist.sample()
+            else:
+                transformation_index = transformation_dist.probs.argmax(-1)
+                interchange_index = interchange_dist.probs.argmax(-1)
+                tiling_index = tiling_dist.probs.argmax(-1)
+                parall_index = parall_dist.probs.argmax(-1)
+                fusion_index = fusion_dist.probs.argmax(-1)
 
         else:
 
@@ -526,3 +556,19 @@ class HiearchyModel(nn.Module):
 
         return actions, action_log_p, values, entropy
         # return action_log_p, entropy, values, sub_entropies
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, dim, dropout=0.1):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim, dim)
+        )
+        self.norm = nn.LayerNorm(dim)
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x):
+        return self.norm(x + self.dropout(self.net(x)))

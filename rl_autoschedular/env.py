@@ -10,6 +10,7 @@ from typing import Optional, Literal
 from rl_autoschedular import config as cfg
 from rl_autoschedular.state import OperationState, BenchmarkFeatures, ObservationFeatures
 from rl_autoschedular.observation import (
+    build_loop_tree_from_raw_op_lowering,
     extract_bench_features_from_file,
     extract_bench_features_from_code,
     extract_op_features_from_affine_code,
@@ -370,7 +371,7 @@ class Env:
                     operation_index=state.operation_index,
                     operation_type='conv_2d+img2col',  # The operation type changes
                     operation_features=operation_features,  # The loops changed because now we are optimization a mamtul instead of a convolution
-                    current_producer = 0,
+                    current_producer = state.current_producer,
                     producer_tag = state.producer_tag,
                     producer_features = state.producer_features,
                     fused_ops = state.fused_ops,
@@ -381,7 +382,7 @@ class Env:
                     exec_time=state.exec_time,
                     root_exec_time=state.root_exec_time,
                     empty_schedule = state.empty_schedule,
-                    transformation_history=state.transformation_history + [(transformation, parameters)],
+                    transformation_history=state.transformation_history, # (img2col,[0]) will be added at the end
                     cummulative_reward=state.cummulative_reward,
                     tmp_file=self.tmp_file
                 )
@@ -497,7 +498,7 @@ class Env:
             #         f.write(state.transformed_code)
 
             transformed_code = state.transformed_code
-            reward -= 5        
+            reward -= cfg.trans_failed_penalty       
 
         # To not re-evaluate the schedule if we are at Done
         evaluated_step = False
@@ -655,9 +656,9 @@ class Env:
                 reward, new_exec_time, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
                 next_state.exec_time = new_exec_time
 
-            # if next_state.empty_schedule:
-            #     reward -= 0.09 # maybe make it a config parameter ??
-            #     print_alert("the model was penalized for an empty_schedule with -0.2")
+            if cfg.empty_penalty and next_state.empty_schedule:
+                reward -= cfg.empty_penalty # maybe make it a config parameter ??
+                print_alert(f"the model was penalized for an empty_schedule with {reward}")
 
         next_state.cummulative_reward += reward
 
@@ -690,7 +691,7 @@ class Env:
             new_exec_time, bench_passed = evaluate_code_with_cmd_and_timeout(transformed_code, self.tmp_file, timeout=200)
         # Print infos and update reward
         if new_exec_time is None:
-            reward -= 20
+            reward -= cfg.execution_error_penalty
             print_error(f"EXECUTION ERROR: {transformation} {parameters} {next_state.transformation_history}")
             new_exec_time = next_state.exec_time
         else:
@@ -700,12 +701,16 @@ class Env:
                 # next_state.exec_time = new_exec_time
                 set_cached_execution_time(transformed_code, new_exec_time)
             else:
-                reward -= 20
+                reward -= cfg.execution_error_penalty
                 print_error("ASSERTION FAILED")
                 new_exec_time = next_state.exec_time
 
         return reward, new_exec_time, (new_exec_time is None or not bench_passed)
 
+    def debug_evaluate_step(self, transformed_code, next_state: OperationState, transformation, parameters, reward):
+        """evaluate function that does nothing. Useful for facilitating debuging tasks"""
+        return reward, next_state.exec_time, True
+    
     def get_obs_old(self, state: OperationState):
         """Build the obervation vector for the input state.
 
@@ -782,6 +787,7 @@ class Env:
         """
 
         op_features_vector = build_op_features_vector(state.operation_features)
+        op_features_vector[1:cfg.max_num_loops + 1] = op_features_vector[1:cfg.max_num_loops + 1] / 100
         
         
         operation_type_int = self.get_op_type_encoding(state.operation_type)
@@ -791,27 +797,26 @@ class Env:
         action_history = state.actions.reshape(-1) # TODO: we have to see how to re-incorporate it
         action_mask = state.actions_mask
 
-        # obs = np.concatenate((
-        #     # The input of the policy network:
-        #     op_features_vector,      # MAX_NUM_LOOPS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM*MAX_NUM_STORES_LOADS + MAX_NUM_LOOPS*MAX_NUM_LOAD_STORE_DIM + 5
+        if cfg.tree_type == "ast":
+            curr_tree = build_loop_tree_from_ast(state.operation_features.nested_loops, op_features_vector)
+        elif cfg.tree_type == "raw_op":
+            curr_tree = build_loop_tree_from_raw_op_lowering(state.operation_features.raw_operation, state.transformed_code, op_features_vector, state.tmp_file)
             
-        #     action_history,  # MAX_NUM_LOOPS*3*CONFIG["truncate"]
-
-        #     # The action mask:
-        #     action_mask     # 5 + MAX_NUM_LOOPS + MAX_NUM_LOOPS + (MAX_NUM_LOOPS-1) + (MAX_NUM_LOOPS-2) + (MAX_NUM_LOOPS-3)
-        # ))
-        curr_tree = build_loop_tree_from_ast(state.operation_features.nested_loops, op_features_vector)
         
         if state.producer_tag != None:
             prod_features_vector = build_op_features_vector(state.producer_features)
+            prod_features_vector[1:cfg.max_num_loops + 1] = prod_features_vector[1:cfg.max_num_loops + 1] / 100 
             
             prod_raw_operation = state.producer_features.raw_operation
             producer_type = self.get_operation_type(prod_raw_operation)
             producer_type_int = self.get_op_type_encoding(producer_type)
             
             prod_features_vector = np.concatenate(([producer_type_int], prod_features_vector))
-            prod_tree = build_loop_tree_from_ast(state.producer_features.nested_loops,prod_features_vector)
             
+            if cfg.tree_type == "ast":
+                prod_tree = build_loop_tree_from_ast(state.producer_features.nested_loops,prod_features_vector)
+            elif cfg.tree_type == "raw_op":
+                prod_tree = build_loop_tree_from_raw_op_lowering(prod_raw_operation, state.transformed_code, prod_features_vector, state.tmp_file)
             
         else:
             producer_type_int = 0

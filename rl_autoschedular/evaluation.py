@@ -62,7 +62,7 @@ def evaluate_code_with_bindings(code: str) -> tuple[Optional[int], bool]:
             bufferize-function-boundaries
             function-boundary-type-conversion=identity-layout-map
         },
-
+        convert-vector-to-scf,
         convert-linalg-to-loops,
         buffer-deallocation-pipeline,
         convert-bufferization-to-memref,
@@ -113,6 +113,7 @@ def evaluate_code_with_bindings(code: str) -> tuple[Optional[int], bool]:
     try:
         [execution_engine.invoke("main", *args) for _ in range(1)]
     except Exception as e:
+        print(e)
         traceback.print_exc()    
         return None, False
 
@@ -134,7 +135,8 @@ def evaluate_code_with_bindings_wrapper(code: str, exec_times, assertions):
         exec_time, assertion = evaluate_code_with_bindings(code)
         exec_times.append(exec_time)
         assertions.append(assertion)
-    except:
+    except Exception as e:
+        print(e)
         traceback.print_exc()        
 
 def evaluate_code_with_bindings_and_timeout(code: str, timeout: Optional[float]) -> tuple[Optional[int], bool]:

@@ -11,6 +11,7 @@ class LoopNode:
         self.children = []
         self.parent = parent
         self.vector = None
+        self.instructions = []
 
     def __repr__(self, level=0):
         indent = "  " * level

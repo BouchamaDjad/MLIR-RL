@@ -150,7 +150,7 @@ for step in tqdm_range:
 
     torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
 
-    if step % 5 == 0:
+    if (step+1) % 10 == 0:
         evaluate_benchmark(
             model=model,
             env=eval_env,

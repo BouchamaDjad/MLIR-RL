@@ -4,14 +4,15 @@ import numpy as np
 from typing import Optional
 from rl_autoschedular.env import ParallelEnv
 from rl_autoschedular.model import HiearchyModel as Model
-from rl_autoschedular.state import LoopNode, OperationState
+from rl_autoschedular.state import BenchmarkFeatures, LoopNode, OperationState
 from rl_autoschedular import config as cfg
 from dataclasses import dataclass
 
-from utils.log import print_error
+from utils.log import print_error, print_success
 import traceback
 from collections import defaultdict
 
+import ray
 
 @dataclass
 class Trajectory:
@@ -390,7 +391,6 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
     """
     # NOTE: Only using one environment
     speedup_values: list[float] = []
-    log: dict[str, list[float]] = defaultdict(list)
 
     for i, (bench_name, benchmark_data) in enumerate(env.envs[0].benchmarks_data):
         if cfg.data_format == 'json' and "bench" not in benchmark_data.bench_name:
@@ -423,23 +423,123 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
                 print('Speedup:', speedup_metric)
 
                 if neptune_logs is not None:
-                    log[f'eval/{env.envs[0].bench_index}_speedup'].append(speedup_metric)
-                    log['eval/final_speedup'].append(speedup_metric)
+                    neptune_logs[f'eval/{env.envs[0].bench_index}_speedup'].append(speedup_metric)
+                    neptune_logs['eval/final_speedup'].append(speedup_metric)
                     speedup_values.append(speedup_metric)
+                
                 break
 
             state = next_state
             obs = next_obs
             # obs = torch.cat(next_obs).to(device)
-        
-        if neptune_logs is not None:
-            for k, v in log.items():
-                for value in v:
-                    neptune_logs[k].append(v)
-
-            log = defaultdict(list)
 
         print('\n\n\n')
+
+    if neptune_logs is not None:
+        neptune_logs['eval/average_speedup'].append(sum(speedup_values) / len(speedup_values))
+
+
+def DistributeEnv(main_env: ParallelEnv, num_env: int):
+    envs = [
+        main_env.copy() for _ in range(num_env)
+    ]
+
+    assert len(set([env.envs[0].tmp_file for env in envs])) != num_env 
+
+    return envs
+
+@ray.remote
+class ModelActor:
+    def __init__(self, model):
+        self.model = model
+
+    def sample(self, *args, **kwargs):
+        return self.model.sample(*args, **kwargs)
+
+@ray.remote(scheduling_strategy="SPREAD")
+def __evaluate(i: int, benchmark_data: BenchmarkFeatures, env: ParallelEnv, model: "ray.ObjectRef[ModelActor]", neptune_logs: Optional[neptune.Run] = None) -> float:
+    
+    if cfg.data_format == 'json' and "bench" not in benchmark_data.bench_name:
+        op_tag = benchmark_data.operation_tags[-1]
+        print(f'Operation ({i}):', benchmark_data.operations[op_tag].raw_operation)
+    else:
+        print(f'Benchmark ({i}):', benchmark_data.bench_name)
+
+    # Reset the environement with the specific operation
+    state, obs = env.reset(i)
+    # obs = torch.cat(obs).to(device)
+
+    while True:
+        x = obs[0]
+            
+        with torch.no_grad():
+            # Select the action using the model
+            action, _, _, _ = ray.get(model.sample.remote(x,greedy=True))
+
+        # Apply the action and get the next state
+        next_obs, _, terminated, next_state, final_state = env.step(state, action)
+
+        done = terminated[0]
+        final_state = final_state[0]
+        if done and final_state is not None:
+            speedup_metric = final_state.root_exec_time / final_state.exec_time
+            print('Operation:', final_state.operation_features.raw_operation)
+            print('Base execution time:', final_state.root_exec_time, 's')
+            print('New execution time:', final_state.exec_time, 's')
+            print('Speedup:', speedup_metric)
+
+            if neptune_logs is not None:
+                neptune_logs[f'eval/{benchmark_data.bench_name}_speedup'].append(speedup_metric)
+                neptune_logs['eval/final_speedup'].append(speedup_metric)
+                # speedup_values.append(speedup_metric)
+
+            break
+
+        state = next_state
+        obs = next_obs
+        # obs = torch.cat(next_obs).to(device)
+
+    print('\n\n\n')
+    return speedup_metric
+
+
+def evaluate_benchmark_ray(model: Model, env: ParallelEnv, device: torch.device = torch.device('cpu'), neptune_logs: Optional[neptune.Run] = None):
+    """Evaluate the benchmark using the model using Ray's preprocessing framework.
+
+    Args:
+        model (Model): The model to use.
+        env (ParallelEnv): The environment to use.
+        device (torch.device): The device to use. Defaults to torch.device('cpu').
+        neptune_logs (Optional[neptune.Run]): The neptune run to log to if any. Defaults to None.
+    """
+    print_success("STARTING")
+
+    benchmarks_data = env.envs[0].benchmarks_data
+    
+    envs = DistributeEnv(env, len(benchmarks_data))
+
+    model = ModelActor.remote(model)
+
+    # # NOTE: Only using one environment
+    future_speedup_values: list[ray.ObjectRef[float]] = [
+        __evaluate
+            .options(enable_task_events=False)
+            .remote(i, benchmark_data, env, model, neptune_logs)
+        
+        for i,(env, (_, benchmark_data)) in enumerate(zip(envs, benchmarks_data))
+    ]
+
+    unifinished = future_speedup_values
+    speedup_values = []
+    while unifinished:
+        try:
+            finished, unifinished = ray.wait(unifinished, num_returns=1)
+            speedup = ray.get(finished[0])
+            speedup_values.append(speedup)
+        except Exception as e:
+            print_error(e)
+
+    print_success("FINISHED")
 
     if neptune_logs is not None:
         neptune_logs['eval/average_speedup'].append(sum(speedup_values) / len(speedup_values))

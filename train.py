@@ -16,11 +16,25 @@ from tqdm import tqdm
 from rl_autoschedular import config as cfg
 from utils.log import print_info
 from utils.neptune_utils import init_neptune
+
 from rl_autoschedular.ppo import (
     collect_trajectory,
+    evaluate_benchmark_ray,
     ppo_update,
     evaluate_benchmark
 )
+
+import ray
+import signal
+import sys
+
+def handle_kill(signum, frame):
+    print_info("Received termination signal. Shutting down Ray...")
+    ray.shutdown()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, handle_kill)
+signal.signal(signal.SIGTERM, handle_kill)
 
 # Set target device
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -125,6 +139,9 @@ print_info(f"Run id: {run_id}")
 
 # Start training
 print_info('Start training ... ')
+
+ray.init()
+
 tqdm_range = tqdm(range(cfg.nb_iterations), desc='Main loop')
 for step in tqdm_range:
 
@@ -151,7 +168,7 @@ for step in tqdm_range:
     torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
 
     if (step+1) % 10 == 0:
-        evaluate_benchmark(
+        evaluate_benchmark_ray(
             model=model,
             env=eval_env,
             device=device,

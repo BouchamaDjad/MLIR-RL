@@ -1,3 +1,4 @@
+from filelock import FileLock
 import numpy as np
 import re
 from typing import Optional
@@ -37,12 +38,9 @@ def extract_function(code: str, name:str = "myFunction") -> str:
 
     return "\n".join(lines[start_index:end_index + 1]),(start_index,end_index + 1)
             
-def build_loops_tree(file_path):
+def build_loops_tree(code):
     
-    with open(file_path, 'r', encoding='utf-8') as file:
-        file_content = file.read()
-    
-    lines = file_content.split('\n') if file_content else []
+    lines = code.split('\n') if code else []
     
     pre_nodes_lines = []
     for line in lines:
@@ -63,7 +61,7 @@ def build_loops_tree(file_path):
 
     # print(pre_nodes_maps)
 
-    lines = extract_function(file_content).split("\n")
+    lines = extract_function(code).split("\n")
     trees = parse_affine_loops(lines)
     for tree in trees: 
         process_tree(tree, pre_nodes_maps)
@@ -76,10 +74,7 @@ def build_loops_tree_using_lowering(content: str, tmp_path: str):
     if not content:
         return None
 
-    with open(tmp_path,"w") as f:
-        f.write(content)
-
-    tree = build_loops_tree(tmp_path)
+    tree = build_loops_tree(content)
 
     return tree
 
@@ -589,8 +584,10 @@ def get_raw_ast_info(code: str, tmp_file_path: str):
         str: the raw AST information
     """
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
 
     result = subprocess.run(
         f'{os.getenv("AST_DUMPER_BIN_PATH")} {tmp_file_path}',
@@ -774,11 +771,13 @@ def __lower_linalg_to_loops(mlir_code: str, tmp_file_path: str):
         Optional[str]: the lowered code with affine dialect
     """
     # Write the MLIR code to a temporary file
-    with open(tmp_file_path, "w") as file:
-        file.write(mlir_code)
+    lock = FileLock(f"{tmp_file_path}.lock")
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(mlir_code)
 
-    # Lower the Linalg dialect code to Affine dialect
-    out = os.popen(f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt --linalg-fuse-elementwise-ops --linalg-fold-unit-extent-dims --one-shot-bufferize=bufferize-function-boundaries --finalizing-bufferize --buffer-deallocation-pipeline --convert-linalg-to-affine-loops {tmp_file_path}").read()
+        # Lower the Linalg dialect code to Affine dialect
+        out = os.popen(f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt --linalg-fuse-elementwise-ops --linalg-fold-unit-extent-dims --one-shot-bufferize=bufferize-function-boundaries --finalizing-bufferize --buffer-deallocation-pipeline --convert-linalg-to-affine-loops {tmp_file_path}").read()
 
     if out != '':
         return out

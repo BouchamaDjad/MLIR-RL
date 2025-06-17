@@ -7,6 +7,8 @@ from rl_autoschedular import config as cfg
 from rl_autoschedular.state import OperationState
 import multiprocessing
 
+from filelock import FileLock
+
 
 # ====================================== Transform dialect functions ======================================
 
@@ -43,12 +45,15 @@ def transform_dialect_TP(code: str, operation_tag: str, tiling_sizes: list[int],
     )
     code = code + transform_dialect_code
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -93,12 +98,15 @@ def transform_dialect_tile(code: str, operation_tag: str, tiling_size: list[int]
 
     code = code + transform_dilaect_code + '\n'
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -143,12 +151,15 @@ def transform_dialect_interchange(code: str, operation_tag: str, interchange_lis
 
     code = code + transform_dilaect_code + '\n'
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -198,12 +209,15 @@ def transform_dialect_fusion(code: str, consumer_tag: str, producer_tag: str, ti
 
     code = code + transform_dialect_code + '\n'
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -323,12 +337,15 @@ transform.named_sequence @__transform_main(%variant_op: !transform.any_op {{tran
 
     code = code + '\n' + transform_dialect_code + '\n'
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -383,12 +400,15 @@ def transform_dialect_vectorize_children(code: str, operation_tag: str, tmp_file
 
     code = code + '\n' + transform_dialect_code + '\n'
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -452,12 +472,14 @@ def transform_dialect_vectorize_with_vectorizer(code: str, operation_tag: str, t
 
     full_code = vect_code + '\n' + transform_dialect_code + '\n'
 
-    with open(tmp_file_path, "w") as file:
-        file.write(full_code)
+    lock = FileLock(f"{tmp_file_path}.lock")
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(full_code)
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -555,12 +577,15 @@ module attributes {{transform.with_named_sequence}} {{
 
     code = code + transform_dilaect_code
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -724,12 +749,15 @@ def apply_conv2d_decomposition(code: str, operation_tag: str, tmp_file_path: str
 
     code = code + '\n' + transform_dialect_code + '\n'
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))
@@ -766,13 +794,18 @@ def get_ops_by_tags(code: str, operation_tags: list, tmp_file_path: str):
 
     code = code + '\n' + transform_dilaect_code + '\n'
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(tmp_file_path+".lock")
 
-    # FIX: This is a temporary fix to avoid the img2col error
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule -o {tmp_file_path}.out",
-    ).read()
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
+
+        # FIX: This is a temporary fix to avoid the img2col error
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file_path} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule -o {tmp_file_path}.out",
+        ).read()
+
+    assert result != ""
 
     lines = result.split('\n')
     res = {}

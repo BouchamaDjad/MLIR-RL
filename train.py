@@ -1,4 +1,5 @@
 # Load environment variables
+import os
 import random
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -53,13 +54,13 @@ def reduce_dataset_size():
     patterns = [(key,item) for key,item in json_data if "single" not in key and "bench" not in key.split("_")[0]]    
     singles = [(key,item) for key,item in json_data if "single" in key]
 
-    synthesized = [(key,item) for key,item in json_data if "bench" in key.split("_")[0]]
-    random.shuffle(synthesized)
+    synthesized = [] #(key,item) for key,item in json_data if "bench" in key.split("_")[0]]
+    # random.shuffle(synthesized)
 
-    synth_len = cfg.dataset_length - (len(patterns) + len(singles))
+    # synth_len = cfg.dataset_length - (len(patterns) + len(singles))
     
-    if synth_len > 0:
-        synthesized = synthesized[:synth_len]
+    # if synth_len > 0:
+    #     synthesized = synthesized[:synth_len]
     
     json_data = patterns + synthesized + singles
     
@@ -140,7 +141,11 @@ print_info(f"Run id: {run_id}")
 # Start training
 print_info('Start training ... ')
 
-ray.init()
+os.environ["RAY_memory_MONITOR_ERROR_THRESHOLD"] = "0.8"  # Optional: triggers warnings at 80% usage
+os.environ["RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE"] = "0"   # Optional: disables slow storage fallback
+os.environ["RAY_memory_MONITOR_WARNING_THRESHOLD"] = "0.7"  # Optional: triggers warnings at 70% usage
+#
+# Then, when you call ray.init(), set the memory limits:
 
 tqdm_range = tqdm(range(cfg.nb_iterations), desc='Main loop')
 for step in tqdm_range:
@@ -167,13 +172,30 @@ for step in tqdm_range:
 
     torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
 
-    if (step+1) % 10 == 0:
+    if step % 10 == 0:
+        ray.init(
+            object_store_memory = 10 * 1024 * 1024 * 1024,  # 10GB for object store
+            _memory = 30 * 1024 * 1024 * 1024,              # 20GB for heap memory (Ray tasks/actors)
+        )
+
+
         evaluate_benchmark_ray(
             model=model,
             env=eval_env,
             device=device,
             neptune_logs=neptune_logs
         )
+
+        ray.shutdown()
+
+        print_info("Starting Normal Evaluation")
+
+        # evaluate_benchmark(
+        #     model=model,
+        #     env=eval_env,
+        #     device=device,
+        #     neptune_logs=neptune_logs
+        # )
 
         if cfg.logging:
             neptune_logs["params"].upload_files([f'models/ppo_model_{run_id}.pt'])

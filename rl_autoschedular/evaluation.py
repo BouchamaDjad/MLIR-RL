@@ -236,10 +236,12 @@ def evaluate_code_with_cmd(code: str, tmp_file_path: str):
 
     os.environ["OMP_NUM_THREADS"] = str(cfg.openmp_num_threads)
 
-    with open(tmp_file_path, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file_path}.lock")
+    with lock:
+        with open(tmp_file_path, "w") as file:
+            file.write(code)
 
-    out = os.popen(f"""{command_1} {tmp_file_path} | {command_2} /dev/stdin""").read()
+        out = os.popen(f"""{command_1} {tmp_file_path} | {command_2} /dev/stdin""").read()
 
     if out:
         return int(out.strip().split('\n')[-1]), True

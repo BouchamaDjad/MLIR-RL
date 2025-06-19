@@ -154,6 +154,8 @@ class Config(metaclass=Singleton):
         self.use_lr_scheduling = config["use_lr_scheduling"]
         self.residual = config["residual"]
         self.tree_type = config["tree_type"]
+
+        self.num_attention_heads = config["num_attention_heads"] if "num_attention_heads" in config else 0
         
         # Check the configuration values
         assert self.train_eval_split >= 0 and self.train_eval_split <= 1, "train_eval_split should be between 0 and 1."
@@ -166,6 +168,7 @@ class Config(metaclass=Singleton):
         assert all(isinstance(v, float) for v in self.bias_values), "All bias_values must be float"
         assert self.tree_type in ["ast", "raw_op"]
         assert self.empty_penalty >= 0
+        assert self.num_attention_heads >=0
 
         if self.cache_file:
             if self.cache_file.endswith(".json"):

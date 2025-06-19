@@ -249,14 +249,28 @@ class HiearchyModel(nn.Module):
             
         self.ELU = nn.ELU()
         
-        self.comps_lstm = nn.LSTM(
-            412, embedding_size, batch_first=True
-        )
-        
-        # LSTM to encode child loop levels
-        self.nodes_lstm = nn.LSTM(
-            self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
-        )
+        # Replace LSTM-based comps/nodes encoding with attention if enabled 
+        self.num_attention_heads = getattr(cfg, "num_attention_heads", 4)
+        self.use_attention = self.num_attention_heads > 0
+
+        if not self.use_attention:
+            self.comps_lstm = nn.LSTM(
+                412, embedding_size, batch_first=True
+            )
+            self.nodes_lstm = nn.LSTM(
+                self.comp_embed_layer_sizes[-1], embedding_size, batch_first=True
+            )
+        else:
+            self.comps_attn = nn.MultiheadAttention(
+                embed_dim=embedding_size,
+                num_heads=self.num_attention_heads,
+                batch_first=True
+            )
+            self.nodes_attn = nn.MultiheadAttention(
+                embed_dim=embedding_size,
+                num_heads=self.num_attention_heads,
+                batch_first=True
+            )
         
         self.roots_lstm = nn.LSTM(
             self.comp_embed_layer_sizes[-1], self.input_dim - AHL, batch_first=True
@@ -317,9 +331,16 @@ class HiearchyModel(nn.Module):
         
             # Pass the embedding of all the child loops through the nodes LSTM
             nodes_tensor = torch.cat(nodes_list, 1)
-            lstm_out, (nodes_h_n, nodes_c_n) = self.nodes_lstm(nodes_tensor)
-            nodes_h_n = nodes_h_n.permute(1, 0, 2)
-        
+            if not self.use_attention:
+                lstm_out, (nodes_h_n, nodes_c_n) = self.nodes_lstm(nodes_tensor)
+                nodes_h_n = nodes_h_n.permute(1, 0, 2)
+            else:
+                # Attention expects (batch, seq, embed)
+                attn_out, attn_weights = self.nodes_attn(
+                    nodes_tensor, nodes_tensor, nodes_tensor
+                )
+                # Use mean pooling over sequence
+                nodes_h_n = attn_out.mean(dim=1, keepdim=True)
         else: # If there are no child loops contained within this level
             # The nodes embedding is a random vector (no_nodes_tensor) that represents that there are no nodes underneath this level
             nodes_h_n = torch.unsqueeze(self.no_nodes_tensor, 0).expand(
@@ -327,13 +348,16 @@ class HiearchyModel(nn.Module):
             )
 
         if node is not None and node.vector is not None:
-            # If there are computations contained in this loop, pass them through the computations LSTM
-            
-            lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(
-                torch.unsqueeze(torch.unsqueeze(torch.tensor(node.vector,dtype=torch.float32),dim=0),dim=0)
-            )
-            # comps_h_n = comps_h_n.permute(1, 0, 2)
-        else: # If there are no child computations contained within this level
+            comps_tensor = torch.unsqueeze(torch.unsqueeze(torch.tensor(node.vector, dtype=torch.float32), dim=0), dim=0)
+            if not self.use_attention:
+                lstm_out, (comps_h_n, comps_c_n) = self.comps_lstm(comps_tensor)
+            else:
+                # For attention, treat comps_tensor as (batch, seq, embed)
+                attn_out, attn_weights = self.comps_attn(
+                    comps_tensor, comps_tensor, comps_tensor
+                )
+                comps_h_n = attn_out.mean(dim=1, keepdim=True)
+        else:# If there are no child computations contained within this level
             # The computations embedding is a random vector (no_comps_tensor) that represents that there are no computations underneath this level
             comps_h_n = torch.unsqueeze(self.no_comps_tensor, 0).expand(
                 1, # i changed it to 1 for now

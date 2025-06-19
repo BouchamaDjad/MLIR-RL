@@ -67,44 +67,45 @@ if __name__ == '__main__':
     STRIDES.extend(config['SHAPES']['STRIDES']) # Used by operations on images
     SIZES.extend(config['SHAPES']['SIZES']) # Used on other operations like matmul, add, etc...    
 
-    # operations_config = {
-    #     operation_name: (LINALG_OPERATION_GENERATORS[operation_name], amount) for operation_name, amount in config['OPERATIONS'].items() if amount > 0
-    # }
-
-    # print( sum( amount for _, (_, amount) in operations_config.items() ) )
-
     operations_config = {
-        # "randomSubGraph": (randomSubGraph, 1400),
-
-        # "Linear block (sigmoid)": (
-        #     lambda :randomblocks(operations=[
-        #         "matmul",
-        #         "add",
-        #         "sigmoid"
-        #     ]),100
-        # ),
-
-        # "Linear block (relu)": (
-        #     lambda :randomblocks(operations=[
-        #         "matmul",
-        #         "add",
-        #         "relu"
-        #     ]),100
-        # ),
-
-        # "Conv2d block": (
-        #     lambda :randomblocks(operations=[
-        #         "conv_2d_nchw_fchw",
-        #         "relu"
-        #     ]),100
-        # ),
-
-        # "Resnet": (generate_resnet_block, 100),
-
-        # "Residual block": (generate_residual_block_mlir, 100)
-
+        f"single_{operation_name}": (LINALG_OPERATION_GENERATORS[operation_name], amount) for operation_name, amount in config['OPERATIONS'].items() if amount > 0
     }
 
+    print( sum( amount for _, (_, amount) in operations_config.items() ) )
+
+    # operations_config.update({
+    #     "bench": (randomSubGraph, 1400),
+
+    #     "pattern-Linear-block (sigmoid)": (
+    #         lambda :randomblocks(operations=[
+    #             "matmul",
+    #             "add",
+    #             "sigmoid"
+    #         ]),100
+    #     ),
+
+    #     "pattern-Linear-block (relu)": (
+    #         lambda :randomblocks(operations=[
+    #             "matmul",
+    #             "add",
+    #             "relu"
+    #         ]),100
+    #     ),
+
+    #     "pattern-Conv2d-block": (
+    #         lambda :randomblocks(operations=[
+    #             "conv_2d_nchw_fchw",
+    #             "relu"
+    #         ]),100
+    #     ),
+
+    #     "pattern-Resnet": (generate_resnet_block, 100),
+
+    #     "pattern-Residual-block": (generate_residual_block_mlir, 100)
+
+    # })
+
+    print(operations_config)
 
     all_operations = {}
 
@@ -156,7 +157,8 @@ if __name__ == '__main__':
             # If a valid execution time was obtained, store the operation details
             if exec_time:
                 
-                all_operations[f"bench_{i}"] = {
+                # all_operations[f"{operation_name}_{i}"] = {
+                all_operations[f"single_{i}"] = {
                     "operation": raw_operation,  # The raw operation
                     "transform_wrapped_operation": transform_wrapped_operation,  # The transformed wrapped operation
                     # "loops_data": loops_data,  # Data related to the loops in the operation
@@ -175,7 +177,11 @@ if __name__ == '__main__':
             unique_transforms_wrapped.add(value["transform_wrapped_operation"])
             unique_operations[key] = value
 
+    print(len(all_operations))
     del all_operations # To save memory
 
     with open(args.output_file, 'w') as file:
         json.dump(unique_operations, file)
+
+    # with open(args.output_file, 'w') as file:
+    #     json.dump(all_operations, file)

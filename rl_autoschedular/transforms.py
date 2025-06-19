@@ -242,12 +242,14 @@ def transform_dialect_fuse_only(code, consumer_tag, producer_tag, tmp_file):
 
     code = code + transform_dilaect_code + '\n'
 
-    with open(tmp_file, "w") as file:
-        file.write(code)
+    lock = FileLock(f"{tmp_file}.lock")
+    with lock:
+        with open(tmp_file, "w") as file:
+            file.write(code)
 
-    result = os.popen(
-        f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
-    ).read()
+        result = os.popen(
+            f"{os.getenv('LLVM_BUILD_PATH')}/bin/mlir-opt {tmp_file} -transform-interpreter -canonicalize -test-transform-dialect-erase-schedule",
+        ).read()
 
     result = result.replace("module {\n", "", 1)
     result = ''.join(result.rsplit('\n}\n', 1))

@@ -140,7 +140,11 @@ class Env:
                     'generic',
                     'linalg.add',
                     "func.call",
-                    'bench'
+                    'bench',
+                    "patterns",
+                    "Residual",
+                    "resnet",
+                    "single"
                 ]
 
                 json_data = [(op, details) for op, details in json_data.items() if any([s in op for s in operation_filter])]
@@ -296,7 +300,7 @@ class Env:
 
         return state, obs
 
-    def step(self, state: OperationState, raw_action: tuple[str, list[int]]) -> tuple[np.ndarray, float, bool, OperationState, Optional[OperationState]]:
+    def step(self, state: OperationState, raw_action: tuple[str, list[int]], **kwargs) -> tuple[np.ndarray, float, bool, OperationState, Optional[OperationState]]:
         """Take a step in the environment.
 
         Args:
@@ -310,6 +314,8 @@ class Env:
             OperationState: The next state of the environment.
             Optional[OperationState]: The final state of the environment if the episode is done.
         """
+        fail_transform = kwargs.get("fail_transform",True)
+
         if state.step_count == 0:
             print("")
             print(f"Operation: {state.bench_name} - {state.operation_tag}")
@@ -542,7 +548,7 @@ class Env:
             )
         else:
             # Switch to the Next operation
-            if not trans_failed and state.operation_index > 0:
+            if transformed_code and state.operation_index > 0:
                 
                 reward, new_exec_time, execution_error = self.evaluate_step(transformed_code, state, transformation, parameters, reward)              
                 evaluated_step = True
@@ -643,7 +649,7 @@ class Env:
         #   The last operation is an unknown operation
         #   We have optimized all the operation and we have Vectorization indicating the end of the schedule
         #   Error occured in the transformation
-        done = (trans_failed) or \
+        done = (trans_failed if fail_transform else False) or \
             (next_state.operation_type in self.skipped_operations) or \
             (next_state.operation_index == 0 and (
                     transformation in ['no_transformation', 'vectorization'] or \
@@ -887,7 +893,7 @@ class Env:
 
         Notes:
             actions_mask: (NUM_TRANSFORMATIONS + L + L + (L-1) + (L-2) + (L-3) )
-            action_mask[:NUM_TRANSFORMATIONS] = [end, TP, T, TF, I, Img2Col]
+            action_mask[:NUM_TRANSFORMATIONS] = [end, TP, T, I, vect, Img2Col, TF]
 
         Args:
             state (OperationState): The current state of the environment.
@@ -1227,7 +1233,7 @@ class ParallelEnv:
             observations.append(obs)
         return states, observations
 
-    def step(self, states: list[OperationState], actions: list[tuple[str, list[int]]]) -> tuple[list[np.ndarray], list[float], list[bool], list[OperationState], list[Optional[OperationState]]]:
+    def step(self, states: list[OperationState], actions: list[tuple[str, list[int]]], **kwargs) -> tuple[list[np.ndarray], list[float], list[bool], list[OperationState], list[Optional[OperationState]]]:
         """Take a step in the environments.
 
         Args:
@@ -1248,7 +1254,7 @@ class ParallelEnv:
         batch_final_state: list[Optional[OperationState]] = []
 
         for i, (state, action) in enumerate(zip(states, actions)):
-            next_obs, reward, done, next_state, final_state = self.envs[i].step(state, action)
+            next_obs, reward, done, next_state, final_state = self.envs[i].step(state, action, **kwargs)
             batch_next_obs.append(next_obs)
             batch_reward.append(reward)
             batch_done.append(done)

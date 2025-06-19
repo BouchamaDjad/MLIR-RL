@@ -52,7 +52,7 @@ def evaluate_benchmark(
                 action, _, _, _ = model.sample(x,greedy=True)
 
             # Apply the action and get the next state
-            next_obs, _, terminated, next_state, final_state = env.step(state, action, fail_transform=False)
+            next_obs, _, terminated, next_state, final_state = env.step(state, action, fail_transform=False, fix_exec_error=True)
 
             done = terminated[0]
             final_state = final_state[0]
@@ -146,8 +146,8 @@ print_info('Finish imports')
 
 import json
 env = ParallelEnv(
-    # env_json_data = list(json.load(open("eval.json")).items())
-    env_json_data = list(json.load(open("evaluate_set.json")).items())
+    env_json_data = [(k,v) for k,v in json.load(open("eval.json")).items() if "matmul" in k]
+    # env_json_data = list(json.load(open("evaluate_set.json")).items())
 )
 
 print_info('Env build ...')
@@ -162,7 +162,7 @@ print_info(cfg)
 # import better_exceptions
 # better_exceptions.hook()
 
-model_checkpoint = "models/ppo_model_MLIR-140-1.pt"
+model_checkpoint = "models/ppo_model_MLIR-136-1.pt"
 
 # Set model
 model = Model()
@@ -170,7 +170,7 @@ print_info('input_dim:', model.input_dim)
 
 model.load_state_dict(torch.load(model_checkpoint))
 
-file = "eval-models-140-no-vect.csv"
+file = "eval-models-matmul-redo.csv"
 
 print_info(file)
 

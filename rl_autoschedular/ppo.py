@@ -584,16 +584,11 @@ def __evaluate(
                 
             logs[f'eval_ray/{benchmark_data.bench_name}_speedup'].append(speedup_metric)
             logs['eval_ray/final_speedup'].append(speedup_metric)
-            # speedup_values.append(speedup_metric)
 
-            break
+            return speedup_metric,logs
 
         state = next_state
         obs = next_obs
-        # obs = torch.cat(next_obs).to(device)
-
-    print('\n\n\n')
-    return speedup_metric,logs
 
 
 def evaluate_benchmark_ray(
@@ -635,6 +630,7 @@ def evaluate_benchmark_ray(
             finished, unifinished = ray.wait(unifinished, num_returns=1)
             speedup,logs = ray.get(finished[0])
             speedup_values.append(speedup)
+            print("logs: ", logs)
             for k, v in logs.items():
                 full_logs[k].extend(v)
             

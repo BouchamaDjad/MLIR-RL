@@ -131,7 +131,7 @@ class Env:
                     with open(cfg.json_file, "r") as file:
                         json_data = json.load(file)
                 else:
-                    json_data = {op: detail for op, detail in env_json_data}
+                    json_data: dict[str,dict] = {op: detail for op, detail in env_json_data}
 
                 operation_filter = [
                     'linalg.matmul',
@@ -140,14 +140,18 @@ class Env:
                     'generic',
                     'linalg.add',
                     "func.call",
-                    'bench',
+                ]
+
+                bench_filter = [
+                    # 'bench',
                     "patterns",
                     "Residual",
                     "resnet",
                     "single"
                 ]
 
-                json_data = [(op, details) for op, details in json_data.items() if any([s in op for s in operation_filter])]
+                json_data = [(op, details) for op, details in json_data.items() if any([s in op for s in bench_filter])]
+                json_data = [(op, details) for op, details in json_data if any([s in details.get("raw_operation","func.call") for s in operation_filter])]
                 # json_data = [(details['operation'], details) for _, details in json_data.items()]
 
 
@@ -271,6 +275,9 @@ class Env:
         else:
             producer_tag = None
             producer_features = None
+
+        if not producer_tag:
+            actions_mask[6] = False # Disable fusion
             
         state = OperationState(
             bench_name=bench_name,
@@ -315,6 +322,7 @@ class Env:
             Optional[OperationState]: The final state of the environment if the episode is done.
         """
         fail_transform = kwargs.get("fail_transform",True)
+        fix_exec_error = kwargs.get("fix_exec_error",False)
 
         if state.step_count == 0:
             print("")
@@ -461,19 +469,17 @@ class Env:
                     skip_decomp = True
                     
                 if not skip_decomp:               
-                    state.transformed_code = apply_transformation_with_timeout(
+                    transformed_code = apply_transformation_with_timeout(
                         state=state,
                         # bench_features=bench_data,
-                        code=state.transformed_code,
+                        code=transformed_code,
                         transformation='tiling',
                         parameters=second_interchange_parameters,
                         timeout=20,
                         # use_vectorizer=cfg.use_vectorizer
                     )
 
-                    state.transformed_code = apply_conv2d_decomposition(state.transformed_code, state.operation_tag, self.tmp_file)
-
-                transformed_code = state.transformed_code
+                    transformed_code = apply_conv2d_decomposition(transformed_code, state.operation_tag, self.tmp_file)
 
             if state.operation_type == 'pooling':
                 # Force no transformation on pooling operations
@@ -484,7 +490,7 @@ class Env:
                 transformed_code = apply_transformation_with_timeout(
                     state=state,
                     # bench_features=bench_data,
-                    code=state.transformed_code,
+                    code=transformed_code,
                     transformation=transformation,
                     parameters=parameters,
                     timeout=20,
@@ -554,6 +560,7 @@ class Env:
                 evaluated_step = True
                 # TODO: see if this could be usefull
                 if execution_error:
+                    transformed_code = state.transformed_code
                     trans_failed = True
 
                 speedup_metric = state.exec_time / new_exec_time
@@ -613,6 +620,9 @@ class Env:
                         # set vectorisation to true, all else false
                         actions_mask[:cfg.num_transformations] = [False, False, False, False, True, False, False]
 
+                    if not producer_tag:
+                        actions_mask[6] = False # No fusion
+
                     next_state = OperationState(
                         bench_name=bench_name,
                         operation_tag=new_op_tag,
@@ -659,8 +669,13 @@ class Env:
 
         if done:
             if not evaluated_step:
-                reward, new_exec_time, _ = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
+                old_reward = reward
+                reward, new_exec_time, error = self.evaluate_step(transformed_code, next_state, transformation, parameters, reward)
                 next_state.exec_time = new_exec_time
+
+                if error and fix_exec_error:
+                    reward, new_exec_time, _ = self.evaluate_step(state.transformed_code, next_state, transformation, parameters, old_reward)
+                    next_state.exec_time = new_exec_time
 
             if cfg.empty_penalty and next_state.empty_schedule:
                 reward -= cfg.empty_penalty # maybe make it a config parameter ??
@@ -958,7 +973,8 @@ class Env:
         else:
             raise ValueError("operation_type must be in [pooling, conv_2d, conv_2d+img2col, matmul, add, generic, func.call]")
         
-        
+        if not state.producer_tag:
+            actions_mask[6] = False # Fusion is de-activated
 
         if num_loops == 1:
             actions_mask[3] = False

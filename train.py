@@ -173,29 +173,29 @@ for step in tqdm_range:
     torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
 
     if step % 10 == 0:
-        ray.init(
-            object_store_memory = 10 * 1024 * 1024 * 1024,  # 10GB for object store
-            _memory = 30 * 1024 * 1024 * 1024,              # 20GB for heap memory (Ray tasks/actors)
-        )
+        # ray.init(
+        #     object_store_memory = 10 * 1024 * 1024 * 1024,  # 10GB for object store
+        #     _memory = 30 * 1024 * 1024 * 1024,              # 20GB for heap memory (Ray tasks/actors)
+        # )
 
 
-        evaluate_benchmark_ray(
-            model=model,
-            env=eval_env,
-            device=device,
-            neptune_logs=neptune_logs
-        )
-
-        ray.shutdown()
-
-        print_info("Starting Normal Evaluation")
-
-        # evaluate_benchmark(
+        # evaluate_benchmark_ray(
         #     model=model,
         #     env=eval_env,
         #     device=device,
         #     neptune_logs=neptune_logs
         # )
+
+        # ray.shutdown()
+
+        # print_info("Starting Normal Evaluation")
+
+        evaluate_benchmark(
+            model=model,
+            env=eval_env,
+            device=device,
+            neptune_logs=neptune_logs
+        )
 
         if cfg.logging:
             neptune_logs["params"].upload_files([f'models/ppo_model_{run_id}.pt'])

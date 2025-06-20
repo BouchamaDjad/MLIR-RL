@@ -189,6 +189,12 @@ class Config(metaclass=Singleton):
 
         os.environ["OMP_NUM_THREADS"] = str(self.openmp_num_threads)
 
+        if "part" in self.json_file:
+            if batch_num := os.getenv("JSON_BATCH_NUM",""):
+                self.json_file += f"{batch_num}.json"
+            else:
+                raise ValueError("$JSON_BATCH_NUM should be provieded if the name json_file contains keyword `part`")
+
         
         # assert self.data_format != "json" or not self.use_bindings, "The specific case of using python bindings with JSON data format is not implemented yet."
         # Set loaded flag

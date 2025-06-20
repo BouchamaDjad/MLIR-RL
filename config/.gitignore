@@ -3,3 +3,4 @@
 # Except these files
 !.gitignore
 !example.json
+!config-split.json

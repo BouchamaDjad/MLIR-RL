@@ -158,7 +158,7 @@ if __name__ == '__main__':
             if exec_time:
                 
                 # all_operations[f"{operation_name}_{i}"] = {
-                all_operations[f"single_{i}"] = {
+                all_operations[f"single_{operation_name}_{i}"] = {
                     "operation": raw_operation,  # The raw operation
                     "transform_wrapped_operation": transform_wrapped_operation,  # The transformed wrapped operation
                     # "loops_data": loops_data,  # Data related to the loops in the operation

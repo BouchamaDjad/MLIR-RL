@@ -143,7 +143,7 @@ class Env:
                 ]
 
                 bench_filter = [
-                    # 'bench',
+                    'bench',
                     "patterns",
                     "Residual",
                     "resnet",
@@ -151,7 +151,7 @@ class Env:
                 ]
 
                 json_data = [(op, details) for op, details in json_data.items() if any([s in op for s in bench_filter])]
-                json_data = [(op, details) for op, details in json_data if any([s in details.get("raw_operation","func.call") for s in operation_filter])]
+                json_data = [(op, details) for op, details in json_data if any([s in details.get("operation","func.call") for s in operation_filter])]
                 # json_data = [(details['operation'], details) for _, details in json_data.items()]
 
 
@@ -276,7 +276,7 @@ class Env:
             producer_tag = None
             producer_features = None
 
-        if not producer_tag:
+        if not producer_tag or producer_tag is None:
             actions_mask[6] = False # Disable fusion
             
         state = OperationState(
@@ -620,7 +620,7 @@ class Env:
                         # set vectorisation to true, all else false
                         actions_mask[:cfg.num_transformations] = [False, False, False, False, True, False, False]
 
-                    if not producer_tag:
+                    if not producer_tag or producer_tag is None:
                         actions_mask[6] = False # No fusion
 
                     next_state = OperationState(
@@ -973,7 +973,7 @@ class Env:
         else:
             raise ValueError("operation_type must be in [pooling, conv_2d, conv_2d+img2col, matmul, add, generic, func.call]")
         
-        if not state.producer_tag:
+        if not state.producer_tag or state.producer_tag is None:
             actions_mask[6] = False # Fusion is de-activated
 
         if num_loops == 1:

@@ -21,12 +21,13 @@ def evaluate_benchmark(
     f: Optional[IO[str]] = None,
     greedy: Optional[bool] = False
 ):
-    """Evaluate the benchmark using the model (save the results to a csv).
+    """Evaluate the benchmarks in the env using the saved model (while saving the execution times to a csv).
 
     Args:
         model (Model): The model to use.
         env (ParallelEnv): The environment to use.
         f (Optional[IO[str]]): A writable file-like object to log results into. Defaults to None.
+        greedy (Optional[bool]): Whether to sample greedily from the model's output action probablities. Defaults to False.
     """
     # NOTE: Only using one environment
 
@@ -77,11 +78,11 @@ def evaluate_benchmark(
 
 def init_env_from_mlir(*file_paths: str, save_set: Optional[bool] = "") -> ParallelEnv:
     """
-    Initialize the environment from one or more MLIR files.
+    Initialize an environment from one or more MLIR files.
 
     Args:
         *file_paths (str): One or more file paths that point to valid MLIR code which should contain the nn model and should be directly runnable.
-        save_set (bool): whether we should save the resulting json structure used in Env class. If True, it gets saved in "evaluate_set.json". Defaults to False.
+        save_set (Optional[str]): the path to where we should save the resulting json structure used in Env class. Defaults to "".
 
     Returns:
         ParallelEnv: env object that uses the nn models in its benchmark_data.
@@ -156,13 +157,12 @@ env = init_env_from_mlir(
     save_set="evaluation-set--bert-convnext-efficienetNet-graphsage.json"
 )
 
+# Use this function call to use already saved env json files
 # import json
 # env = ParallelEnv(
-#     # env_json_data = list(json.load(open("eval.json")).items()) # nazim set in binding
+#     # env_json_data = list(json.load(open("eval.json")).items()) # nazim set in python binding format
 #     # env_json_data = list(json.load(open("evaluate_set.json")).items()) # resnet vgg mobilenet
 # )
-
-exit()
 
 print_info('Env build ...')
 

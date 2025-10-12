@@ -4,7 +4,7 @@ import subprocess
 from typing import Optional
 from utils.log import print_alert, print_error
 from rl_autoschedular import config as cfg
-from rl_autoschedular.state import OperationState
+from rl_autoschedular.state import OperationFeatures, OperationState
 import multiprocessing
 
 from filelock import FileLock
@@ -12,7 +12,7 @@ from filelock import FileLock
 
 # ====================================== Transform dialect functions ======================================
 
-def transform_dialect_TP(code: str, operation_tag: str, tiling_sizes: list[int], tmp_file_path: str):
+def transform_dialect_Parallelization(code: str, operation_tag: str, tiling_sizes: list[int], tmp_file_path: str):
     """Apply the tiling and parallelization transformation to the specified operation in the given code.
 
     Args:
@@ -168,7 +168,7 @@ def transform_dialect_interchange(code: str, operation_tag: str, interchange_lis
     return result
 
 
-def transform_dialect_fusion(code: str, consumer_tag: str, producer_tag: str, tiling_size: list[int],tmp_file_path: str):
+def transform_dialect_TF(code: str, consumer_tag: str, producer_tag: str, tiling_size: list[int],tmp_file_path: str):
     """Apply the tiling and fusion transformation to the specified operation in the given code.
 
     Args:
@@ -595,6 +595,16 @@ module attributes {{transform.with_named_sequence}} {{
 
     return result
 
+def transform_dialect_TP(code: str, operation_tag: str, operation_features: OperationFeatures, parameters: list[int], tmp_file):
+    
+    parallel_params = [0 if operation_features.nested_loops[i].iterator_type == "reduction" else parameters[i] for i in range(len(parameters))]
+    tiling_params = [parameters[i] if operation_features.nested_loops[i].iterator_type == "reduction" else 0 for i in range(len(parameters))]
+    
+    new_code = transform_dialect_tile(code, operation_tag, tiling_params, tmp_file)
+    new_code = transform_dialect_Parallelization(new_code, operation_tag, parallel_params, tmp_file)
+
+    return new_code
+
 
 def apply_transformation(state: OperationState, code: str, transformation: str, parameters: list) -> str:
     """Apply the specified transformation to the given code.
@@ -627,7 +637,7 @@ def apply_transformation(state: OperationState, code: str, transformation: str, 
         parallel_params = [0 if state.operation_features.nested_loops[i].iterator_type == "reduction" else parameters[i] for i in range(len(parameters))]
         tiling_params = [parameters[i] if state.operation_features.nested_loops[i].iterator_type == "reduction" else 0 for i in range(len(parameters))]
         new_code = transform_dialect_tile(code, state.operation_tag, tiling_params, tmp_file)
-        new_code = transform_dialect_TP(new_code, state.operation_tag, parallel_params, tmp_file)
+        new_code = transform_dialect_Parallelization(new_code, state.operation_tag, parallel_params, tmp_file)
     
     elif transformation == 'interchange':
         if not parameters:
@@ -664,7 +674,7 @@ def apply_transformation(state: OperationState, code: str, transformation: str, 
         
         if state.producer_tag is not None:
             if state.operation_tag not in state.fused_ops:
-                new_code = transform_dialect_fusion(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
+                new_code = transform_dialect_TF(code, state.operation_tag, state.producer_tag, parameters ,tmp_file)
             else:
                 new_code = transform_dialect_fuse_only(code, state.operation_tag, state.producer_tag, tmp_file)
            

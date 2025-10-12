@@ -1131,13 +1131,13 @@ def main_wrapper(operation, tmp_file, maps: Optional[str]=None, additional_funct
 
     main_code = f"func.func @main({', '.join([f'{arg}: {shape}' for arg,shape in zip(args, shapes) ])}) -> i64 attributes {{ llvm.emit_c_interface }} {{\n"
     
-    main_code += "    %c1 = arith.constant 1: index\n"
-    main_code += "    %c0 = arith.constant 0 : index\n"
-    main_code += "    %n = arith.constant 2: index\n"
-    main_code += "    %init_delta = arith.constant 0 : i64\n"
+    main_code += "    //%c1 = arith.constant 1: index\n"
+    main_code += "    //%c0 = arith.constant 0 : index\n"
+    main_code += "    //%n = arith.constant 2: index\n"
+    main_code += "    //%init_delta = arith.constant 0 : i64\n"
     
     main_code += " \n"
-    main_code += "    %final_delta = scf.for %i = %c0 to %n step %c1 iter_args(%d = %init_delta) -> (i64) {\n"
+    main_code += "    // %final_delta = scf.for %i = %c0 to %n step %c1 iter_args(%d = %init_delta) -> (i64) {\n"
     main_code += "    %t0 = func.call @nanoTime() : () -> (i64)\n"
     
     main_code += f"    %outputmain =  func.call @wrapper({', '.join(args)}) : ({', '.join(shapes)}) -> ({return_shape})\n"
@@ -1148,9 +1148,10 @@ def main_wrapper(operation, tmp_file, maps: Optional[str]=None, additional_funct
     # main_code += f"    %global = memref.get_global @my_global_memref : memref<{'x'.join(last_dim)}xf32>\n"
     # main_code += f"    memref.copy %memref, %global : memref<{'x'.join(last_dim)}xf32> to memref<{'x'.join(last_dim)}xf32>\n"
     # main_code += "    func.call @printNewline() : () -> ()\n"
-    main_code += "    scf.yield %delta : i64\n"
-    main_code += "}\n"
-    main_code += "    return %final_delta : i64\n"
+    main_code += "//    scf.yield %delta : i64\n"
+    main_code += "//}\n"
+    # main_code += "    return %final_delta : i64\n"
+    main_code += "    return %delta : i64\n"
     main_code += "}\n"
     main_code += "}\n"
 

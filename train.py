@@ -25,17 +25,17 @@ from rl_autoschedular.ppo import (
     evaluate_benchmark
 )
 
-import ray
-import signal
-import sys
+# import ray
+# import signal
+# import sys
 
-def handle_kill(signum, frame):
-    print_info("Received termination signal. Shutting down Ray...")
-    ray.shutdown()
-    sys.exit(0)
+# def handle_kill(signum, frame):
+#     print_info("Received termination signal. Shutting down Ray...")
+#     ray.shutdown()
+#     sys.exit(0)
 
-signal.signal(signal.SIGINT, handle_kill)
-signal.signal(signal.SIGTERM, handle_kill)
+# signal.signal(signal.SIGINT, handle_kill)
+# signal.signal(signal.SIGTERM, handle_kill)
 
 # Set target device
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -141,64 +141,71 @@ print_info(f"Run id: {run_id}")
 # Start training
 print_info('Start training ... ')
 
-os.environ["RAY_memory_MONITOR_ERROR_THRESHOLD"] = "0.8"  # Optional: triggers warnings at 80% usage
-os.environ["RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE"] = "0"   # Optional: disables slow storage fallback
-os.environ["RAY_memory_MONITOR_WARNING_THRESHOLD"] = "0.7"  # Optional: triggers warnings at 70% usage
+# os.environ["RAY_memory_MONITOR_ERROR_THRESHOLD"] = "0.8"  # Optional: triggers warnings at 80% usage
+# os.environ["RAY_OBJECT_STORE_ALLOW_SLOW_STORAGE"] = "0"   # Optional: disables slow storage fallback
+# os.environ["RAY_memory_MONITOR_WARNING_THRESHOLD"] = "0.7"  # Optional: triggers warnings at 70% usage
 #
 # Then, when you call ray.init(), set the memory limits:
 
-tqdm_range = tqdm(range(cfg.nb_iterations), desc='Main loop')
-for step in tqdm_range:
+evaluate_benchmark(
+    model=model,
+    env=eval_env,
+    device=device,
+    neptune_logs=neptune_logs
+)
 
-    trajectory = collect_trajectory(
-        cfg.len_trajectory,
-        model,
-        env,
-        device=device,
-        neptune_logs=neptune_logs
-    )
+# tqdm_range = tqdm(range(cfg.nb_iterations), desc='Main loop')
+# for step in tqdm_range:
 
-    loss = ppo_update(
-        trajectory,
-        model,
-        optimizer,
-        scheduler,
-        ppo_epochs=cfg.ppo_epochs,
-        ppo_batch_size=cfg.ppo_batch_size,
-        device=device,
-        entropy_coef=cfg.entropy_coef,
-        neptune_logs=neptune_logs
-    )
+#     trajectory = collect_trajectory(
+#         cfg.len_trajectory,
+#         model,
+#         env,
+#         device=device,
+#         neptune_logs=neptune_logs
+#     )
 
-    torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
+#     loss = ppo_update(
+#         trajectory,
+#         model,
+#         optimizer,
+#         scheduler,
+#         ppo_epochs=cfg.ppo_epochs,
+#         ppo_batch_size=cfg.ppo_batch_size,
+#         device=device,
+#         entropy_coef=cfg.entropy_coef,
+#         neptune_logs=neptune_logs
+#     )
 
-    if step % 10 == 0:
-        # ray.init(
-        #     object_store_memory = 10 * 1024 * 1024 * 1024,  # 10GB for object store
-        #     _memory = 30 * 1024 * 1024 * 1024,              # 20GB for heap memory (Ray tasks/actors)
-        # )
+#     torch.save(model.state_dict(), f'models/ppo_model_{run_id}.pt')
+
+#     if step % 5 == 0:
+#         # ray.init(
+#         #     object_store_memory = 10 * 1024 * 1024 * 1024,  # 10GB for object store
+#         #     _memory = 30 * 1024 * 1024 * 1024,              # 20GB for heap memory (Ray tasks/actors)
+#         # )
 
 
-        # evaluate_benchmark_ray(
-        #     model=model,
-        #     env=eval_env,
-        #     device=device,
-        #     neptune_logs=neptune_logs
-        # )
+#         # evaluate_benchmark_ray(
+#         #     model=model,
+#         #     env=eval_env,
+#         #     device=device,
+#         #     neptune_logs=neptune_logs
+#         # )
 
-        # ray.shutdown()
+#         # ray.shutdown()
 
-        # print_info("Starting Normal Evaluation")
+#         # print_info("Starting Normal Evaluation")
 
-        evaluate_benchmark(
-            model=model,
-            env=eval_env,
-            device=device,
-            neptune_logs=neptune_logs
-        )
+#         evaluate_benchmark(
+#             model=model,
+#             env=eval_env,
+#             device=device,
+#             neptune_logs=neptune_logs
+#         )
 
-        if cfg.logging:
-            neptune_logs["params"].upload_files([f'models/ppo_model_{run_id}.pt'])
+#         if cfg.logging:
+#             neptune_logs["params"].upload_files([f'models/ppo_model_{run_id}.pt'])
 
 
 # Stop logs if enabled

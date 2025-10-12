@@ -419,7 +419,7 @@ def evaluate_benchmark(model: Model, env: ParallelEnv, device: torch.device = to
 
             with torch.no_grad():
                 # Select the action using the model
-                action, _, _, _ = model.sample(x,greedy=True)
+                action, _, _, _ = model.sample(x)
 
             # Apply the action and get the next state
             next_obs, _, terminated, next_state, final_state = env.step(state, action)

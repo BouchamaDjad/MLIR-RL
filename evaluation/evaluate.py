@@ -18,7 +18,8 @@ from utils.log import print_info
 def evaluate_benchmark(
     model: Model,
     env: ParallelEnv,
-    f: Optional[IO[str]] = None
+    f: Optional[IO[str]] = None,
+    greedy: Optional[bool] = False
 ):
     """Evaluate the benchmark using the model (save the results to a csv).
 
@@ -49,7 +50,7 @@ def evaluate_benchmark(
 
             with torch.no_grad():
                 # Select the action using the model
-                action, _, _, _ = model.sample(x,greedy=True)
+                action, _, _, _ = model.sample(x,greedy=greedy)
 
             # Apply the action and get the next state
             next_obs, _, terminated, next_state, final_state = env.step(state, action, fail_transform=False, fix_exec_error=True)
@@ -63,16 +64,18 @@ def evaluate_benchmark(
                 print('New execution time:', final_state.exec_time, 's')
                 print('Speedup:', speedup_metric)
 
-                if f is not None : f.write(
-                    f"{bench_name:<20},{final_state.root_exec_time},{final_state.exec_time},{speedup_metric}\n"
-                )
+                if f is not None : 
+                    f.write(
+                        f"{bench_name:<20},{final_state.root_exec_time},{final_state.exec_time},{speedup_metric}\n"
+                    )
+                    f.flush()
                 
                 break
 
             state = next_state
             obs = next_obs
 
-def init_env_from_mlir(*file_paths: str, save_set: Optional[bool] = False) -> ParallelEnv:
+def init_env_from_mlir(*file_paths: str, save_set: Optional[bool] = "") -> ParallelEnv:
     """
     Initialize the environment from one or more MLIR files.
 
@@ -120,7 +123,7 @@ def init_env_from_mlir(*file_paths: str, save_set: Optional[bool] = False) -> Pa
         )
 
     if save_set:
-        with open("evaluate_set.json", "w") as f:
+        with open(save_set,"w") as f:
             import json
             json.dump(dict(json_data), f, indent=4)
 
@@ -135,20 +138,31 @@ def init_env_from_mlir(*file_paths: str, save_set: Optional[bool] = False) -> Pa
 
 device = torch.device("cpu")
 
+model_checkpoint = "models/ppo_model_MLIR-185-1.pt"
+
+# Set model
+model = Model()
+print_info('input_dim:', model.input_dim)
+
+model.load_state_dict(torch.load(model_checkpoint))
+
 print_info('Finish imports')
 
 # Set environment
-# env = init_env_from_mlir(
-#     # "./benchs/DenseNet-bench.mlir",
-#     "./benchs/MobileNetV2-bench.mlir","./benchs/ResNet-bench.mlir","./benchs/VGG-bench.mlir",
-#     save_set=True
+env = init_env_from_mlir(
+    # "./benchs/DenseNet-bench.mlir",
+    # "./benchs/MobileNetV2-bench.mlir","./benchs/ResNet-bench.mlir","./benchs/VGG-bench.mlir",
+    "benchs/base-bert-bench.mlir","benchs/bert-bench.mlir","benchs/ConvNeXt-bench.mlir","benchs/ConvNeXt-large-bench.mlir","benchs/EfficientNet-bench.mlir","benchs/graphsage-1-bench-restrict.mlir",
+    save_set="evaluation-set--bert-convnext-efficienetNet-graphsage.json"
+)
+
+# import json
+# env = ParallelEnv(
+#     # env_json_data = list(json.load(open("eval.json")).items()) # nazim set in binding
+#     # env_json_data = list(json.load(open("evaluate_set.json")).items()) # resnet vgg mobilenet
 # )
 
-import json
-env = ParallelEnv(
-    env_json_data = [(k,v) for k,v in json.load(open("eval.json")).items() if "matmul" in k]
-    # env_json_data = list(json.load(open("evaluate_set.json")).items())
-)
+exit()
 
 print_info('Env build ...')
 
@@ -162,15 +176,7 @@ print_info(cfg)
 # import better_exceptions
 # better_exceptions.hook()
 
-model_checkpoint = "models/ppo_model_MLIR-136-1.pt"
-
-# Set model
-model = Model()
-print_info('input_dim:', model.input_dim)
-
-model.load_state_dict(torch.load(model_checkpoint))
-
-file = "eval-models-matmul-redo.csv"
+file = "eval.csv"
 
 print_info(file)
 

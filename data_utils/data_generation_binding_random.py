@@ -30,12 +30,14 @@ from data_utils.generation import (
     SIZES,
     randomSubGraph,
     randomblocks,
-    # ResNetBlock,
     generate_resnet_block,
-    generate_residual_block_mlir
+    generate_residual_block_mlir,
+    vgg,
+    bert,
+    convnext
 )
 
-tmp_file = 'tmp/tmp-3.mlir'
+tmp_file = 'tmp/tmp-2.mlir'
 
 class ParserMock:
     def __init__(self,input_file,output_file):
@@ -67,45 +69,52 @@ if __name__ == '__main__':
     STRIDES.extend(config['SHAPES']['STRIDES']) # Used by operations on images
     SIZES.extend(config['SHAPES']['SIZES']) # Used on other operations like matmul, add, etc...    
 
-    operations_config = {
-        f"single_{operation_name}": (LINALG_OPERATION_GENERATORS[operation_name], amount) for operation_name, amount in config['OPERATIONS'].items() if amount > 0
-    }
+    # operations_config = {
+    #     f"single_{operation_name}": (LINALG_OPERATION_GENERATORS[operation_name], amount) for operation_name, amount in config['OPERATIONS'].items() if amount > 0
+    # }
 
-    print( sum( amount for _, (_, amount) in operations_config.items() ) )
+    operations_config = ({
+    #     # "synth_bench": (randomSubGraph, 1400),
 
-    # operations_config.update({
-    #     "bench": (randomSubGraph, 1400),
+        # "pattern-Linear-block (sigmoid)": (
+        #     lambda :randomblocks(operations=[
+        #         "matmul",
+        #         "add",
+        #         "sigmoid"
+        #     ]),200
+        # ),
 
-    #     "pattern-Linear-block (sigmoid)": (
-    #         lambda :randomblocks(operations=[
-    #             "matmul",
-    #             "add",
-    #             "sigmoid"
-    #         ]),100
-    #     ),
+        # "pattern-Linear-block (relu)": (
+        #     lambda :randomblocks(operations=[
+        #         "matmul",
+        #         "add",
+        #         "relu"
+        #     ]),200
+        # ),
 
-    #     "pattern-Linear-block (relu)": (
-    #         lambda :randomblocks(operations=[
-    #             "matmul",
-    #             "add",
-    #             "relu"
-    #         ]),100
-    #     ),
+        # "pattern-Conv2d-block": (
+        #     lambda :randomblocks(operations=[
+        #         "conv_2d_nchw_fchw",
+        #         "relu"
+        #     ]),200
+        # ),
 
-    #     "pattern-Conv2d-block": (
-    #         lambda :randomblocks(operations=[
-    #             "conv_2d_nchw_fchw",
-    #             "relu"
-    #         ]),100
-    #     ),
+        # "pattern-Resnet": (generate_resnet_block, 200),
 
-    #     "pattern-Resnet": (generate_resnet_block, 100),
+        # "pattern-Residual-block": (generate_residual_block_mlir, 200)
 
-    #     "pattern-Residual-block": (generate_residual_block_mlir, 100)
+        # "pattern-VGG": (vgg, 100),
+        "pattern-bert": (bert, 100),
+        # "pattern-convnext": (convnext, 60),
 
-    # })
+    })
 
     print(operations_config)
+
+    print("\n\n")
+
+    print( "sum: ",sum( amount for _, (_, amount) in operations_config.items() ) )
+
 
     all_operations = {}
 
@@ -158,7 +167,7 @@ if __name__ == '__main__':
             if exec_time:
                 
                 # all_operations[f"{operation_name}_{i}"] = {
-                all_operations[f"single_{operation_name}_{i}"] = {
+                all_operations[f"{operation_name}_{i}"] = {
                     "operation": raw_operation,  # The raw operation
                     "transform_wrapped_operation": transform_wrapped_operation,  # The transformed wrapped operation
                     # "loops_data": loops_data,  # Data related to the loops in the operation
@@ -169,19 +178,19 @@ if __name__ == '__main__':
         
     
     # Remove duplicates from all_operations based on 'transform_wrapped_operation' value
-    unique_operations = {}
-    unique_transforms_wrapped = set()
+    # unique_operations = {}
+    # unique_transforms_wrapped = set()
     
-    for key, value in all_operations.items():
-        if value["transform_wrapped_operation"] not in unique_transforms_wrapped:
-            unique_transforms_wrapped.add(value["transform_wrapped_operation"])
-            unique_operations[key] = value
+    # for key, value in all_operations.items():
+    #     if value["transform_wrapped_operation"] not in unique_transforms_wrapped:
+    #         unique_transforms_wrapped.add(value["transform_wrapped_operation"])
+    #         unique_operations[key] = value
 
-    print(len(all_operations))
-    del all_operations # To save memory
-
-    with open(args.output_file, 'w') as file:
-        json.dump(unique_operations, file)
+    # print(len(all_operations))
+    # del all_operations # To save memory
 
     # with open(args.output_file, 'w') as file:
-    #     json.dump(all_operations, file)
+    #     json.dump(unique_operations, file)
+
+    with open(args.output_file, 'w') as file:
+        json.dump(all_operations, file)

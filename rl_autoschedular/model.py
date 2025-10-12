@@ -211,7 +211,7 @@ class HiearchyModel(nn.Module):
         
         AHL = cfg.max_num_loops * 4 * cfg.truncate # Action history len
 
-        self.comp_embed_layer_sizes=[600, 350, 512, 512] # 411 = 1 + L + L * D * SD + L * D + 5 + 6
+        self.comp_embed_layer_sizes=[600, 350, 512, 512]
         self.drops=[0.225, 0.225, 0.225, 0.225]        
         self.num_loops = L
         self.num_transformations = cfg.num_transformations

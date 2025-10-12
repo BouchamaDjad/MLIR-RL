@@ -88,8 +88,9 @@ class Env:
     """The temporary file to store the intermediate representations."""
 
     def __init__(self, reset_repeat: int = 1, step_repeat: int = 1, tmp_file: Optional[str] = None,
-                 benchmark_data: list[BenchmarkFeatures] = None,
-                 env_json_data: Optional[list[tuple[str, dict]]] = None):
+                 benchmark_data: Optional[list[BenchmarkFeatures]] = None,
+                 env_json_data: Optional[list[tuple[str, dict]]] = None,
+                 operation_filter: Optional[list[str]] = None):
         """Initialize the environment.
 
         Args:
@@ -133,7 +134,7 @@ class Env:
                 else:
                     json_data: dict[str,dict] = {op: detail for op, detail in env_json_data}
 
-                operation_filter = [
+                operation_filter = operation_filter if operation_filter is not None else [
                     'linalg.matmul',
                     'linalg.conv_2d',
                     'pooling',
@@ -144,10 +145,12 @@ class Env:
 
                 bench_filter = [
                     'bench',
-                    "patterns",
+                    "pattern",
                     "Residual",
                     "resnet",
-                    "single"
+                    "single",
+                    "linalg",
+                    ""
                 ]
 
                 json_data = [(op, details) for op, details in json_data.items() if any([s in op for s in bench_filter])]
@@ -525,11 +528,11 @@ class Env:
             new_actions_mask = self.update_action_mask(state, transformation, num_loops)
 
             #TODO: Better to be put it in the update_action_mask function            
-            if transformation == 'fusion' or transformation == 'parallelization':
-                # change the mask to only allow vectorisation in the next step
-                vectorization_index = 4
-                new_actions_mask[:cfg.num_transformations] = [False, False, False, False, False, False, False]
-                new_actions_mask[vectorization_index] = True
+            # if transformation == 'fusion' or transformation == 'parallelization':
+            #     # change the mask to only allow vectorisation in the next step
+            #     vectorization_index = 4
+            #     new_actions_mask[:cfg.num_transformations] = [False, False, False, False, False, False, False]
+            #     new_actions_mask[vectorization_index] = True
             
             next_state = OperationState(
                 bench_name=state.bench_name,
@@ -616,9 +619,10 @@ class Env:
                     actions_mask = self.initialize_action_mask(len(new_op_features.nested_loops), new_operation_type)
                     
                     # TODO: add state or just `state.fused_ops` as parameter to initialize_action_mask
-                    if new_op_tag in state.fused_ops:
-                        # set vectorisation to true, all else false
-                        actions_mask[:cfg.num_transformations] = [False, False, False, False, True, False, False]
+                    # if new_op_tag in state.fused_ops:
+                    # BUG: Could be the reason why vect fails alot
+                    #     # set vectorisation to true, all else false
+                    #     actions_mask[:cfg.num_transformations] = [False, False, False, False, True, False, False]
 
                     if not producer_tag or producer_tag is None:
                         actions_mask[6] = False # No fusion
@@ -935,7 +939,7 @@ class Env:
             actions_mask[:TP_BEGIN] = [False, True, False, False, False, False, False]
         
         if transformation == "fusion":
-            actions_mask[:TP_BEGIN] = [False, False, False, False, True, False, False]
+            actions_mask[:TP_BEGIN] = [False, False, False, False, True, False, True]
 
         if state.operation_type == "pooling" or state.operation_type == "conv_2d":
             if transformation == 'parallelization':
